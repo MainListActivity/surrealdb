@@ -1,13 +1,14 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use axum::extract::{Request, State};
+use axum::extract::{Query, Request, State};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Extension, Router};
 use http::HeaderValue;
 use http::header::RETRY_AFTER;
+use serde::Deserialize;
 
 use super::AppState;
 use crate::ntw::error::Error as NetError;
@@ -15,9 +16,10 @@ use crate::ntw::error::Error as NetError;
 /// The `/ready` route: the Kubernetes startup/readiness signal.
 ///
 /// Returns `200` only once the instance has finished starting up (import +
-/// credentials) **and**, when a heartbeat budget is configured, the current
-/// node's cluster heartbeat is fresh. Returns `503` while still starting up or
-/// when the heartbeat is stale, and `500` if the heartbeat can't be read.
+/// credentials), the native quota storage/backend contract is ready, and,
+/// when a heartbeat budget is configured, the current node's cluster heartbeat
+/// is fresh. Additional comma-separated capability requirements can be supplied
+/// with `?require=...`. Returns `503` when any required contract is unavailable.
 /// Contrast with `/status` (process/listener liveness only) and `/health`
 /// (backend reachability only).
 pub(super) fn router<S>() -> Router<S>
@@ -27,8 +29,42 @@ where
 	Router::new().route("/ready", get(ready_handler))
 }
 
-async fn ready_handler(Extension(state): Extension<AppState>) -> Result<(), NetError> {
-	community_readiness(&state).await
+#[derive(Debug, Default, Deserialize)]
+struct ReadyQuery {
+	require: Option<String>,
+}
+
+async fn ready_handler(
+	Extension(state): Extension<AppState>,
+	Query(query): Query<ReadyQuery>,
+) -> Result<(), NetError> {
+	community_readiness(&state).await?;
+	let mut required = parse_required_capabilities(query.require.as_deref());
+	if required.is_empty() {
+		required.push(surrealdb_core::kvs::NATIVE_QUOTA_CAPABILITY.to_owned());
+	}
+	let storage = state.datastore.native_quota_storage_status().await.map_err(|error| {
+		warn!(error = %error, "Native quota readiness could not inspect datastore format");
+		NetError::NotReady
+	})?;
+	let document = crate::capability::CapabilityDocument::current(storage).map_err(|error| {
+		warn!(error = %error, "Native quota readiness capability manifest is invalid");
+		NetError::NotReady
+	})?;
+	document.require(&required).map_err(|error| {
+		warn!(error = %error, "Required server capability is not ready");
+		NetError::NotReady
+	})
+}
+
+fn parse_required_capabilities(value: Option<&str>) -> Vec<String> {
+	value
+		.into_iter()
+		.flat_map(|value| value.split(','))
+		.map(str::trim)
+		.filter(|value| !value.is_empty())
+		.map(str::to_owned)
+		.collect()
 }
 
 /// The community readiness decision behind the `/ready` route, exposed so an
@@ -71,7 +107,10 @@ pub async fn community_readiness(state: &AppState) -> Result<(), NetError> {
 /// startup; `/status` is liveness; `/health` is backend reachability; `/version`
 /// is static metadata; and `/metrics` must stay scrapeable throughout startup.
 fn always_available(path: &str) -> bool {
-	matches!(path, "/" | "/status" | "/health" | "/version" | "/ready" | "/metrics")
+	matches!(
+		path,
+		"/" | "/status" | "/health" | "/version" | "/capabilities" | "/ready" | "/metrics"
+	)
 }
 
 /// Middleware that returns `503 Service Unavailable` for user-facing endpoints
@@ -98,15 +137,20 @@ pub(super) async fn readiness_gate(
 
 #[cfg(test)]
 mod tests {
+	use std::sync::Arc;
+
 	use axum::Router;
 	use axum::body::Body;
 	use axum::middleware::from_fn_with_state;
 	use axum::routing::get;
 	use http::header::RETRY_AFTER;
 	use http::{Request, StatusCode};
+	use surrealdb_core::kvs::Datastore;
 	use tower::ServiceExt;
 
 	use super::*;
+	use crate::ntw::Readiness;
+	use crate::ntw::client_ip::ClientIp;
 
 	fn app(ready: bool) -> Router {
 		let flag = Arc::new(AtomicBool::new(ready));
@@ -115,6 +159,7 @@ mod tests {
 			.route("/status", get(|| async {}))
 			.route("/health", get(|| async { "ok" }))
 			.route("/version", get(|| async { "ok" }))
+			.route("/capabilities", get(|| async { "ok" }))
 			.route("/ready", get(|| async { "ok" }))
 			.route("/metrics", get(|| async { "ok" }))
 			.route("/sql", get(|| async { "ok" }))
@@ -132,7 +177,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn allowlisted_routes_serve_while_starting() {
-		for uri in ["/", "/status", "/health", "/version", "/ready", "/metrics"] {
+		for uri in ["/", "/status", "/health", "/version", "/capabilities", "/ready", "/metrics"] {
 			assert_eq!(
 				status_of(app(false), uri).await,
 				StatusCode::OK,
@@ -171,5 +216,48 @@ mod tests {
 				"{uri} should serve once ready"
 			);
 		}
+	}
+
+	#[test]
+	fn capability_requirements_are_comma_separated_and_trimmed() {
+		assert_eq!(
+			parse_required_capabilities(Some(" native-quota-v1, future-v2 ")),
+			["native-quota-v1", "future-v2"]
+		);
+		assert!(parse_required_capabilities(None).is_empty());
+	}
+
+	#[tokio::test]
+	async fn required_native_quota_readiness_checks_runtime_contract() {
+		let datastore = Arc::new(Datastore::new("memory").await.unwrap());
+		datastore.check_version().await.unwrap();
+		let state = AppState {
+			client_ip: ClientIp::None,
+			datastore,
+			metrics_observer: None,
+			readiness: Readiness {
+				ready: Arc::new(AtomicBool::new(true)),
+				max_heartbeat_age: None,
+			},
+		};
+		ready_handler(
+			Extension(state.clone()),
+			Query(ReadyQuery {
+				require: Some("native-quota-v1".to_owned()),
+			}),
+		)
+		.await
+		.unwrap();
+		ready_handler(Extension(state.clone()), Query(ReadyQuery::default())).await.unwrap();
+		assert!(matches!(
+			ready_handler(
+				Extension(state),
+				Query(ReadyQuery {
+					require: Some("future-v2".to_owned()),
+				}),
+			)
+			.await,
+			Err(NetError::NotReady)
+		));
 	}
 }

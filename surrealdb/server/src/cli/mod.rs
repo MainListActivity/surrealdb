@@ -1,7 +1,9 @@
 #![allow(deprecated)]
 
 pub(crate) mod abstraction;
+mod capability_client;
 mod config;
+mod datastore;
 mod export;
 mod fix;
 mod import;
@@ -30,6 +32,7 @@ use std::time::Duration;
 use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
 pub use config::{Config, ConfigCheck, ConfigCheckRequirements};
+use datastore::DatastoreCommand;
 use export::ExportCommandArguments;
 use fix::FixCommandArguments;
 use import::ImportCommandArguments;
@@ -196,6 +199,8 @@ enum Commands {
 	Validate(ValidateCommandArguments),
 	#[command(about = "Fix database storage issues")]
 	Fix(FixCommandArguments),
+	#[command(subcommand, about = "Inspect and explicitly migrate native quota datastore formats")]
+	Datastore(DatastoreCommand),
 	#[command(about = "Run commands in version 2 of the database for backwards compatibility")]
 	V2(V2Commands),
 }
@@ -327,6 +332,7 @@ pub async fn init<
 		Commands::IsReady(args) => isready::init(args).await,
 		Commands::Validate(args) => validate::init(args).await,
 		Commands::Fix(args) => fix::init::<C>(args).await,
+		Commands::Datastore(args) => datastore::init(composer, args).await,
 		Commands::V2(args) => v2::init(args).await,
 	};
 	// Flush every provider's batch processor so audit / slow-query

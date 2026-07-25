@@ -50,6 +50,9 @@ pub async fn init(
 	// Default datastore configuration for local engines
 	let config = Config::new().capabilities(Capabilities::all());
 	let is_local = any::__into_endpoint(&endpoint)?.parse_kind()?.is_local();
+	if !is_local {
+		super::capability_client::require_matching_remote(&endpoint).await?;
+	}
 	// If username and password are specified, and we are connecting to a remote
 	// SurrealDB server, then we need to authenticate. If we are connecting
 	// directly to a datastore (i.e. surrealkv://local.skv or tikv://...), then we

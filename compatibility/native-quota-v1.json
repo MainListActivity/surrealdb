@@ -1,0 +1,73 @@
+{
+  "format_version": 1,
+  "manifest_revision": "native-quota-v1-dev.1",
+  "fork_id": "mainlistactivity/surrealdb-native-quota",
+  "fork_release": "3.3.0-native-quota.1",
+  "capabilities": [
+    "native-quota-v1"
+  ],
+  "contracts": {
+    "quota_major": 1,
+    "info_format_version": 1,
+    "error_format_version": 1,
+    "error_wire_code": -32010
+  },
+  "formats": {
+    "storage_marker": 1,
+    "upstream_storage_major": 3,
+    "fork_storage_major": 32771,
+    "quota_catalog": 1,
+    "quota_usage": 1
+  },
+  "cli": {
+    "release": "3.3.0-native-quota.1",
+    "requires_exact_release_for_destructive_operations": true
+  },
+  "sdk": {
+    "surrealdb_js": [],
+    "protocols": [
+      "http",
+      "ws"
+    ]
+  },
+  "migration": {
+    "capability": "native-quota-v1",
+    "minimum_cli_release": "3.3.0-native-quota.1"
+  },
+  "backends": [
+    {
+      "name": "memory",
+      "hard_quota_certified": true,
+      "production": false
+    },
+    {
+      "name": "rocksdb",
+      "hard_quota_certified": false,
+      "production": false
+    },
+    {
+      "name": "surrealkv",
+      "hard_quota_certified": false,
+      "production": false
+    },
+    {
+      "name": "tikv",
+      "hard_quota_certified": false,
+      "production": false
+    },
+    {
+      "name": "indxdb",
+      "hard_quota_certified": false,
+      "production": false
+    }
+  ],
+  "oci_labels": {
+    "org.opencontainers.image.vendor": "MainListActivity",
+    "io.mainlistactivity.surrealdb.fork": "mainlistactivity/surrealdb-native-quota",
+    "io.mainlistactivity.surrealdb.fork-release": "3.3.0-native-quota.1",
+    "io.mainlistactivity.surrealdb.quota-contract": "native-quota-v1",
+    "io.mainlistactivity.surrealdb.storage-format": "1",
+    "io.mainlistactivity.surrealdb.quota-catalog-format": "1",
+    "io.mainlistactivity.surrealdb.quota-usage-format": "1"
+  }
+}

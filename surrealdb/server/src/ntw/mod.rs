@@ -1,5 +1,6 @@
 pub mod api;
 mod auth;
+pub mod capabilities;
 pub mod client_ip;
 pub mod error;
 pub mod export;
@@ -153,6 +154,7 @@ pub fn community_router(exclude: &[&str]) -> Router<Arc<RpcState>> {
 		// Redirect until we provide a UI
 		.route("/", get(|| async { Redirect::temporary(cnf::APP_ENDPOINT) }))
 		.route("/status", get(|| async {}))
+		.merge(capabilities::router())
 		.merge(health::router());
 	if !exclude.contains(&"/ready") {
 		router = router.merge(ready::router());

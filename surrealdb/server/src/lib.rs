@@ -18,6 +18,7 @@
 #[macro_use]
 extern crate tracing;
 
+pub mod capability;
 mod cli;
 mod cnf;
 mod dbs;

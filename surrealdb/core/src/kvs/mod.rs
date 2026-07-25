@@ -16,6 +16,7 @@
 
 pub mod config;
 pub mod export;
+mod native_quota;
 
 mod api;
 mod batch;
@@ -69,6 +70,13 @@ pub use ds::{
 pub use err::{Error, Result};
 pub use into::IntoBytes;
 pub(crate) use key::{KVKey, KVValue, impl_kv_key_storekey, impl_kv_value_revisioned};
+pub use native_quota::{
+	NATIVE_QUOTA_CAPABILITY, NATIVE_QUOTA_ERROR_FORMAT_VERSION, NATIVE_QUOTA_INFO_FORMAT_VERSION,
+	NATIVE_QUOTA_STORAGE_STATUS_FORMAT_VERSION, NativeQuotaMigrationOptions,
+	NativeQuotaMigrationReport, NativeQuotaStorageMarker, NativeQuotaStorageState,
+	NativeQuotaStorageStatus, native_quota_fork_contract, native_quota_format_contract,
+	native_quota_storage_version_contract,
+};
 pub use timestamp::{
 	BoxTimeStamp, BoxTimeStampImpl, HlcTimeStamp, HlcTimeStampImpl, IncTimeStampImpl,
 	MAX_TIMESTAMP_BYTES, TimeStamp, TimeStampImpl,

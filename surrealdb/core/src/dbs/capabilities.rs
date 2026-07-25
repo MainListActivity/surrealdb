@@ -369,6 +369,7 @@ impl std::str::FromStr for MethodTarget {
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq, PartialOrd, Ord)]
 pub enum RouteTarget {
+	Capabilities,
 	Health,
 	Export,
 	Import,
@@ -390,6 +391,7 @@ pub enum RouteTarget {
 impl fmt::Display for RouteTarget {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
+			RouteTarget::Capabilities => write!(f, "capabilities"),
 			RouteTarget::Health => write!(f, "health"),
 			RouteTarget::Export => write!(f, "export"),
 			RouteTarget::Import => write!(f, "import"),
@@ -430,6 +432,7 @@ impl std::str::FromStr for RouteTarget {
 
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
 		match s {
+			"capabilities" => Ok(RouteTarget::Capabilities),
 			"health" => Ok(RouteTarget::Health),
 			"export" => Ok(RouteTarget::Export),
 			"import" => Ok(RouteTarget::Import),
