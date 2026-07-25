@@ -70,6 +70,7 @@ impl RemoveFieldStatement {
 		};
 		// Delete the definition
 		let key = crate::key::table::fd::new(ns, db, &table_name, &name);
+		txn.quota_usage(ns, db).register_field_delta(&table_name, -1).await?;
 		txn.del(&key).await?;
 		// If the removed field declared a REFERENCE, purge the reference keys it
 		// wrote. Those keys live under the referenced (target) record's range,

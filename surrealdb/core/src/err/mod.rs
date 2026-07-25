@@ -30,6 +30,38 @@ use crate::val::{CastError, CoerceError, Duration, RecordId, TableName, Value};
 mod to_types;
 pub(crate) use to_types::into_types_error;
 
+/// Detailed, boxed payload for a quota admission failure.
+///
+/// Keeping this out of the inline [`Error`] representation avoids inflating
+/// every error value and the deeply nested async futures which carry it.
+#[derive(Debug)]
+pub(crate) struct QuotaExceededError {
+	pub rule: String,
+	pub resource: String,
+	pub table: String,
+	pub current: u64,
+	pub delta: i128,
+	pub projected: u64,
+	pub limit: u64,
+}
+
+impl Display for QuotaExceededError {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		write!(
+			f,
+			"Quota rule '{}' for {} on table '{}' would be exceeded: current {}, delta {}, \
+			 projected {}, limit {}",
+			self.rule,
+			self.resource,
+			self.table,
+			self.current,
+			self.delta,
+			self.projected,
+			self.limit
+		)
+	}
+}
+
 /// Convert an [`anyhow::Error`] into a structured [`surrealdb_types::Error`].
 ///
 /// If the inner error is a core database error, it is downcast and converted using the full
@@ -989,6 +1021,10 @@ pub(crate) enum Error {
 	QuotaUsageNotReady {
 		state: String,
 	},
+
+	/// A protected resource would exceed its configured quota
+	#[error("{0}")]
+	QuotaExceeded(Box<QuotaExceededError>),
 
 	/// The requested table already exists
 	#[error("The table '{name}' already exists")]

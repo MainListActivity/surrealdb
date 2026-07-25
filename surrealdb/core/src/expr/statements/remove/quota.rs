@@ -41,7 +41,10 @@ impl RemoveQuotaStatement {
 				name: database.clone(),
 			}
 		})?;
+		txn.flush_quota_usage().await?;
 		txn.quota_usage(db.namespace_id, db.database_id).ensure_writable_for_update().await?;
+		let generation_key = Qg::new(db.namespace_id, db.database_id);
+		let stored_generation = txn.get(&generation_key, None).await?;
 		let Some(current) = txn.get_db_quota(db.namespace_id, db.database_id, None).await? else {
 			if self.if_exists {
 				return Ok(Value::None);
@@ -61,8 +64,8 @@ impl RemoveQuotaStatement {
 			current.generation.checked_add(1).ok_or_else(|| Error::QuotaPolicyInvalid {
 				reason: "quota policy generation overflow".to_owned(),
 			})?;
-		txn.set(&Qg::new(db.namespace_id, db.database_id), &tombstone_generation).await?;
-		txn.del(&Qt::new(db.namespace_id, db.database_id)).await?;
+		txn.putc(&generation_key, &tombstone_generation, stored_generation.as_ref()).await?;
+		txn.delc(&Qt::new(db.namespace_id, db.database_id), Some(current.as_ref())).await?;
 		txn.clear_cache();
 		Ok(Value::None)
 	}

@@ -1,12 +1,18 @@
 //! Transaction-scoped access to protected native quota usage state.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 use anyhow::{Result, bail};
 
 use super::Transaction;
-use crate::catalog::{DatabaseId, NamespaceId, QuotaUsageMeta, QuotaUsageState};
-use crate::err::Error;
+use crate::catalog::providers::DatabaseProvider;
+use crate::catalog::{
+	DatabaseId, NamespaceId, QuotaLimit, QuotaPolicyDefinition, QuotaResource, QuotaSelector,
+	QuotaUsageMeta, QuotaUsageState, TableDefinition,
+};
+use crate::err::{Error, QuotaExceededError};
+use crate::key::database::qg::Qg;
 use crate::key::database::qm::Qm;
 use crate::key::database::qub::QuotaTableBucket;
 use crate::key::database::que::QuotaEpochRoot;
@@ -14,6 +20,44 @@ use crate::key::database::quf::QuotaFieldUsage;
 use crate::key::database::qur::QuotaRecordUsage;
 use crate::kvs::{KVKey, KVValue, NORMAL_BATCH_SIZE};
 use crate::val::TableName;
+
+#[derive(Clone, Debug)]
+struct BoundQuotaDatabase {
+	observed_generation: Option<u64>,
+	meta: QuotaUsageMeta,
+	policy: Option<Arc<QuotaPolicyDefinition>>,
+}
+
+#[derive(Clone, Debug, Default)]
+struct QuotaTransactionSnapshot {
+	databases: BTreeMap<(NamespaceId, DatabaseId), BoundQuotaDatabase>,
+	table_deltas: BTreeMap<(NamespaceId, DatabaseId, TableName), i128>,
+	field_deltas: BTreeMap<(NamespaceId, DatabaseId, TableName), i128>,
+	reset_tables: BTreeSet<(NamespaceId, DatabaseId, TableName)>,
+}
+
+/// Transaction-local quota intents. The final signed delta is applied once at commit.
+#[derive(Debug, Default)]
+pub(crate) struct QuotaTransactionState {
+	current: QuotaTransactionSnapshot,
+	savepoints: Vec<QuotaTransactionSnapshot>,
+}
+
+impl QuotaTransactionState {
+	pub(crate) fn new_save_point(&mut self) {
+		self.savepoints.push(self.current.clone());
+	}
+
+	pub(crate) fn release_last_save_point(&mut self) {
+		self.savepoints.pop();
+	}
+
+	pub(crate) fn rollback_to_save_point(&mut self) {
+		if let Some(snapshot) = self.savepoints.pop() {
+			self.current = snapshot;
+		}
+	}
+}
 
 /// Quota operations bound to the same transaction as the protected business write.
 pub(crate) struct QuotaTransaction<'a> {
@@ -79,9 +123,249 @@ impl Transaction {
 			db,
 		}
 	}
+
+	/// Resolve all transaction-local quota intents and stage one conditional
+	/// counter update per affected bucket.
+	pub(crate) async fn flush_quota_usage(&self) -> Result<()> {
+		// Keep registrations and savepoint changes serialized with the flush.
+		// Transaction execution is normally sequential, but `Transaction` is
+		// shareable and must not lose a late intent between snapshot and clear.
+		let mut quota_state = self.quota_state.lock().await;
+		let snapshot = quota_state.current.clone();
+		if snapshot.table_deltas.values().all(|delta| *delta == 0)
+			&& snapshot.field_deltas.values().all(|delta| *delta == 0)
+			&& snapshot.reset_tables.is_empty()
+		{
+			quota_state.current = QuotaTransactionSnapshot::default();
+			return Ok(());
+		}
+
+		for ((ns, db), bound) in &snapshot.databases {
+			let facade = self.quota_usage(*ns, *db);
+			// Reassert both observed fences. A concurrent usage rebuild or policy
+			// generation switch must make this business transaction conflict.
+			facade.reassert_meta(&bound.meta).await?;
+			let epoch = bound.meta.active_epoch.ok_or_else(|| Error::QuotaUsageInvalid {
+				reason: "ready quota usage metadata has no active epoch".to_owned(),
+			})?;
+			let generation_key = Qg::new(*ns, *db);
+			match bound.observed_generation {
+				Some(generation) => {
+					self.putc(&generation_key, &generation, Some(&generation)).await?;
+				}
+				None => {
+					self.putc(&generation_key, &0, None).await?;
+				}
+			}
+
+			let mut buckets = BTreeMap::<String, (i128, QuotaLimit, TableName)>::new();
+			if let Some(policy) = &bound.policy {
+				for ((delta_ns, delta_db, table), delta) in &snapshot.table_deltas {
+					if delta_ns != ns || delta_db != db || *delta == 0 {
+						continue;
+					}
+					for rule in policy.rules.iter().filter(|rule| {
+						rule.resource == QuotaResource::Table
+							&& selector_matches(&rule.selector, table)
+					}) {
+						let bucket = buckets.entry(rule.id.to_string()).or_insert((
+							0,
+							rule.limit,
+							table.clone(),
+						));
+						if *delta > 0 {
+							bucket.2 = table.clone();
+						}
+						bucket.0 = bucket.0.checked_add(*delta).ok_or_else(|| {
+							Error::QuotaUsageInvalid {
+								reason: "transactional table quota delta overflow".to_owned(),
+							}
+						})?;
+					}
+				}
+
+				for (rule, (delta, limit, table)) in buckets {
+					if delta == 0 {
+						continue;
+					}
+					let key = QuotaTableBucket::new(*ns, *db, epoch, policy.generation, &rule);
+					let current = self.get(&key, None).await?;
+					let current_value = current.unwrap_or(0);
+					let projected = project_counter(current_value, delta)?;
+					enforce_limit(limit, &rule, "table", &table, current_value, delta, projected)?;
+					if projected == 0 {
+						self.delc(&key, current.as_ref()).await?;
+					} else {
+						self.putc(&key, &projected, current.as_ref()).await?;
+					}
+				}
+			}
+
+			let field_tables = snapshot
+				.field_deltas
+				.keys()
+				.filter(|(delta_ns, delta_db, _)| delta_ns == ns && delta_db == db)
+				.map(|(_, _, table)| table.clone())
+				.chain(
+					snapshot
+						.reset_tables
+						.iter()
+						.filter(|(reset_ns, reset_db, _)| reset_ns == ns && reset_db == db)
+						.map(|(_, _, table)| table.clone()),
+				)
+				.collect::<BTreeSet<_>>();
+			for table in field_tables {
+				let delta =
+					snapshot.field_deltas.get(&(*ns, *db, table.clone())).copied().unwrap_or(0);
+				let reset = snapshot.reset_tables.contains(&(*ns, *db, table.clone()));
+				let key = QuotaFieldUsage::new(*ns, *db, epoch, &table);
+				let current = self.get(&key, None).await?;
+				let current_value = current.unwrap_or(0);
+				let projected = project_counter(
+					if reset {
+						0
+					} else {
+						current_value
+					},
+					delta,
+				)?;
+				let effective_delta = i128::from(projected) - i128::from(current_value);
+				if let Some((rule, limit)) =
+					bound.policy.as_deref().and_then(|policy| effective_field_rule(policy, &table))
+				{
+					enforce_limit(
+						limit,
+						&rule,
+						"field",
+						&table,
+						current_value,
+						effective_delta,
+						projected,
+					)?;
+				}
+				if projected == 0 {
+					if current.is_some() {
+						self.delc(&key, current.as_ref()).await?;
+					}
+				} else {
+					self.putc(&key, &projected, current.as_ref()).await?;
+				}
+			}
+
+			for (reset_ns, reset_db, table) in &snapshot.reset_tables {
+				if reset_ns != ns || reset_db != db {
+					continue;
+				}
+				let key = QuotaRecordUsage::new(*ns, *db, epoch, table);
+				let current = self.get(&key, None).await?;
+				if current.is_some() {
+					self.delc(&key, current.as_ref()).await?;
+				}
+			}
+		}
+
+		quota_state.current = QuotaTransactionSnapshot::default();
+		Ok(())
+	}
 }
 
 impl QuotaTransaction<'_> {
+	/// Materialise table-rule buckets for a newly installed policy generation.
+	///
+	/// Policy assignment may intentionally place a database over its new limit,
+	/// so this seeds observed usage without applying admission checks.
+	pub(crate) async fn initialize_policy_table_buckets(
+		&self,
+		policy: &QuotaPolicyDefinition,
+		tables: &[TableDefinition],
+	) -> Result<()> {
+		let meta = self.ensure_writable_for_update().await?;
+		let epoch = meta.active_epoch.expect("ready metadata has an active epoch");
+		for rule in policy.rules.iter().filter(|rule| rule.resource == QuotaResource::Table) {
+			let count =
+				tables.iter().filter(|table| selector_matches(&rule.selector, &table.name)).count();
+			let count = u64::try_from(count).map_err(|_| Error::QuotaUsageInvalid {
+				reason: "table catalog count does not fit in quota counter".to_owned(),
+			})?;
+			if count == 0 {
+				continue;
+			}
+			let key =
+				QuotaTableBucket::new(self.ns, self.db, epoch, policy.generation, rule.id.as_str());
+			self.tx.putc(&key, &count, None).await?;
+		}
+		Ok(())
+	}
+
+	async fn bind_database(&self) -> Result<()> {
+		if self.tx.quota_state.lock().await.current.databases.contains_key(&(self.ns, self.db)) {
+			return Ok(());
+		}
+		let meta = self.ensure_writable().await?;
+		let observed_generation = self.tx.get(&Qg::new(self.ns, self.db), None).await?;
+		let policy = self.tx.get_db_quota(self.ns, self.db, None).await?;
+		if let Some(policy) = &policy
+			&& Some(policy.generation) != observed_generation
+		{
+			bail!(Error::QuotaUsageInvalid {
+				reason: format!(
+					"quota policy generation {} does not match generation fence {:?}",
+					policy.generation, observed_generation
+				),
+			});
+		}
+		self.tx.quota_state.lock().await.current.databases.entry((self.ns, self.db)).or_insert(
+			BoundQuotaDatabase {
+				observed_generation,
+				meta,
+				policy,
+			},
+		);
+		Ok(())
+	}
+
+	/// Record one physical-table existence transition in the transaction-local ledger.
+	pub(crate) async fn register_table_delta(&self, table: &TableName, delta: i128) -> Result<()> {
+		if delta == 0 {
+			return Ok(());
+		}
+		self.bind_database().await?;
+		let mut state = self.tx.quota_state.lock().await;
+		let entry =
+			state.current.table_deltas.entry((self.ns, self.db, table.clone())).or_default();
+		*entry = entry.checked_add(delta).ok_or_else(|| Error::QuotaUsageInvalid {
+			reason: "transactional table quota delta overflow".to_owned(),
+		})?;
+		Ok(())
+	}
+
+	/// Record a table deletion and reset all per-table usage without scanning records.
+	pub(crate) async fn register_table_removal(&self, table: &TableName) -> Result<()> {
+		self.register_table_delta(table, -1).await?;
+		let mut state = self.tx.quota_state.lock().await;
+		let key = (self.ns, self.db, table.clone());
+		// Earlier per-field deltas are subsumed by the table deletion. Only
+		// fields defined after a possible recreation contribute to the new table.
+		state.current.field_deltas.remove(&key);
+		state.current.reset_tables.insert(key);
+		Ok(())
+	}
+
+	/// Record one explicit field-definition existence transition.
+	pub(crate) async fn register_field_delta(&self, table: &TableName, delta: i128) -> Result<()> {
+		if delta == 0 {
+			return Ok(());
+		}
+		self.bind_database().await?;
+		let mut state = self.tx.quota_state.lock().await;
+		let entry =
+			state.current.field_deltas.entry((self.ns, self.db, table.clone())).or_default();
+		*entry = entry.checked_add(delta).ok_or_else(|| Error::QuotaUsageInvalid {
+			reason: "transactional field quota delta overflow".to_owned(),
+		})?;
+		Ok(())
+	}
+
 	/// Initialise the protected empty ledger for a newly-created database.
 	pub(crate) async fn initialize_new_database(&self) -> Result<()> {
 		let key = Qm::new(self.ns, self.db);
@@ -518,4 +802,86 @@ impl QuotaTransaction<'_> {
 		self.decrement(QuotaTableBucket::new(self.ns, self.db, epoch, generation, rule), amount)
 			.await
 	}
+}
+
+fn selector_matches(selector: &QuotaSelector, table: &TableName) -> bool {
+	match selector {
+		QuotaSelector::Exact(exact) => exact.as_str() == table.as_str(),
+		QuotaSelector::Regex(regex) => regex.inner().is_match(table.as_str()),
+	}
+}
+
+fn effective_field_rule(
+	policy: &QuotaPolicyDefinition,
+	table: &TableName,
+) -> Option<(String, QuotaLimit)> {
+	let matching = policy.rules.iter().filter(|rule| {
+		rule.resource == QuotaResource::Field && selector_matches(&rule.selector, table)
+	});
+	let mut exact = None;
+	let mut regex_unlimited = None;
+	let mut regex_finite = None::<(&str, u64)>;
+	for rule in matching {
+		match (&rule.selector, rule.limit) {
+			(QuotaSelector::Exact(_), limit) => {
+				exact = Some((rule.id.to_string(), limit));
+			}
+			(QuotaSelector::Regex(_), QuotaLimit::Finite(limit)) => {
+				if regex_finite.is_none_or(|(_, current)| limit < current) {
+					regex_finite = Some((rule.id.as_str(), limit));
+				}
+			}
+			(QuotaSelector::Regex(_), QuotaLimit::Unlimited) => {
+				if regex_unlimited.is_none() {
+					regex_unlimited = Some(rule.id.as_str());
+				}
+			}
+		}
+	}
+	exact.or_else(|| {
+		regex_finite
+			.map(|(id, limit)| (id.to_owned(), QuotaLimit::Finite(limit)))
+			.or_else(|| regex_unlimited.map(|id| (id.to_owned(), QuotaLimit::Unlimited)))
+	})
+}
+
+fn project_counter(current: u64, delta: i128) -> Result<u64> {
+	let projected =
+		i128::from(current).checked_add(delta).ok_or_else(|| Error::QuotaUsageInvalid {
+			reason: "quota usage counter arithmetic overflow".to_owned(),
+		})?;
+	u64::try_from(projected).map_err(|_| {
+		Error::QuotaUsageInvalid {
+			reason: format!(
+				"quota usage counter underflow: cannot apply delta {delta} to {current}"
+			),
+		}
+		.into()
+	})
+}
+
+fn enforce_limit(
+	limit: QuotaLimit,
+	rule: &str,
+	resource: &str,
+	table: &TableName,
+	current: u64,
+	delta: i128,
+	projected: u64,
+) -> Result<()> {
+	let QuotaLimit::Finite(limit) = limit else {
+		return Ok(());
+	};
+	if projected <= limit || (current > limit && projected <= current) {
+		return Ok(());
+	}
+	bail!(Error::QuotaExceeded(Box::new(QuotaExceededError {
+		rule: rule.to_owned(),
+		resource: resource.to_owned(),
+		table: table.to_string(),
+		current,
+		delta,
+		projected,
+		limit,
+	})))
 }

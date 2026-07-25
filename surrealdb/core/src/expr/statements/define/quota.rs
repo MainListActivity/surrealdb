@@ -3,7 +3,7 @@ use reblessive::tree::Stk;
 
 use super::DefineKind;
 use crate::catalog::QuotaPolicyDefinition;
-use crate::catalog::providers::DatabaseProvider;
+use crate::catalog::providers::{DatabaseProvider, TableProvider};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -45,9 +45,11 @@ impl DefineQuotaStatement {
 				name: database.clone(),
 			}
 		})?;
+		txn.flush_quota_usage().await?;
 		txn.quota_usage(db.namespace_id, db.database_id).ensure_writable_for_update().await?;
 		let quota_key = Qt::new(db.namespace_id, db.database_id);
 		let generation_key = Qg::new(db.namespace_id, db.database_id);
+		let stored_generation = txn.get(&generation_key, None).await?;
 		let current = txn.get_db_quota(db.namespace_id, db.database_id, None).await?;
 		let policy = match current.as_deref() {
 			Some(current) => match self.kind {
@@ -95,17 +97,21 @@ impl DefineQuotaStatement {
 					});
 				}
 				let generation =
-					txn.get(&generation_key, None).await?.unwrap_or(0).checked_add(1).ok_or_else(
-						|| Error::QuotaPolicyInvalid {
+					stored_generation.unwrap_or(0).checked_add(1).ok_or_else(|| {
+						Error::QuotaPolicyInvalid {
 							reason: "quota policy generation overflow".to_owned(),
-						},
-					)?;
+						}
+					})?;
 				QuotaPolicyDefinition::new(database.clone().into(), generation, self.rules.clone())?
 			}
 		};
 
-		txn.set(&quota_key, &policy).await?;
-		txn.set(&generation_key, &policy.generation).await?;
+		txn.putc(&quota_key, &policy, current.as_deref()).await?;
+		txn.putc(&generation_key, &policy.generation, stored_generation.as_ref()).await?;
+		let tables = txn.all_tb(db.namespace_id, db.database_id, None).await?;
+		txn.quota_usage(db.namespace_id, db.database_id)
+			.initialize_policy_table_buckets(&policy, &tables)
+			.await?;
 		txn.clear_cache();
 		Ok(Value::None)
 	}

@@ -4,7 +4,7 @@ use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use surrealdb_types::{SqlFormat, ToSql};
 
-use crate::catalog::providers::DatabaseProvider;
+use crate::catalog::providers::{DatabaseProvider, TableProvider};
 use crate::catalog::{QuotaPolicyDefinition, QuotaRuleDefinition};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
@@ -47,7 +47,10 @@ impl AlterQuotaStatement {
 				name: database.clone(),
 			}
 		})?;
+		txn.flush_quota_usage().await?;
 		txn.quota_usage(db.namespace_id, db.database_id).ensure_writable_for_update().await?;
+		let generation_key = Qg::new(db.namespace_id, db.database_id);
+		let stored_generation = txn.get(&generation_key, None).await?;
 		let Some(current) = txn.get_db_quota(db.namespace_id, db.database_id, None).await? else {
 			if self.if_exists {
 				return Ok(Value::None);
@@ -110,8 +113,13 @@ impl AlterQuotaStatement {
 			current.generation.checked_add(1).ok_or_else(|| Error::QuotaPolicyInvalid {
 				reason: "quota policy generation overflow".to_owned(),
 			})?;
-		txn.set(&Qt::new(db.namespace_id, db.database_id), &policy).await?;
-		txn.set(&Qg::new(db.namespace_id, db.database_id), &policy.generation).await?;
+		txn.putc(&Qt::new(db.namespace_id, db.database_id), &policy, Some(current.as_ref()))
+			.await?;
+		txn.putc(&generation_key, &policy.generation, stored_generation.as_ref()).await?;
+		let tables = txn.all_tb(db.namespace_id, db.database_id, None).await?;
+		txn.quota_usage(db.namespace_id, db.database_id)
+			.initialize_policy_table_buckets(&policy, &tables)
+			.await?;
 		txn.clear_cache();
 		Ok(Value::None)
 	}

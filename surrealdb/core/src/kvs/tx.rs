@@ -59,6 +59,7 @@ use crate::kvs::index::{
 	BuildGeneration, BuildTicket, BuildTicketMutationSeq, IndexBuildPhase, IndexBuildReportStatus,
 	IndexBuildState, IndexBuilder,
 };
+use crate::kvs::quota::QuotaTransactionState;
 use crate::kvs::sequences::Sequences;
 #[cfg(test)]
 use crate::kvs::testing::{
@@ -165,6 +166,8 @@ pub struct Transaction {
 	/// state and index data from separate transactions. These cleanups remove that
 	/// provisional state only when the schema transaction does not commit.
 	pending_uncommitted_index_builds: Mutex<Vec<PendingUncommittedIndexBuild>>,
+	/// Signed quota deltas buffered until this transaction commits.
+	pub(crate) quota_state: Mutex<Box<QuotaTransactionState>>,
 }
 
 const INDEX_BUILD_RESERVATION_RELEASE_RETRY_SLEEP: Duration = Duration::from_millis(100);
@@ -790,6 +793,7 @@ impl Transaction {
 			cached_index_build_reservations: Mutex::new(HashMap::new()),
 			pending_index_builder_aborts: Mutex::new(Vec::new()),
 			pending_uncommitted_index_builds: Mutex::new(Vec::new()),
+			quota_state: Mutex::new(Box::default()),
 		}
 	}
 
@@ -1078,6 +1082,15 @@ impl Transaction {
 	/// This attempts to commit all changes made within the transaction.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn commit(&self) -> Result<()> {
+		if let Err(e) = self.flush_quota_usage().await {
+			if let Err(err) = self.cancel().await {
+				tracing::warn!(
+					target: "surrealdb::core::kvs::tx",
+					"transaction cleanup failed after quota enforcement failed; preserving original quota error {e}: {err}"
+				);
+			}
+			return Err(e);
+		}
 		// Store any buffered changefeed entries. Failure here falls into
 		// `cancel`, which itself emits the transaction event, so avoid
 		// double-emission from this path.
@@ -1831,17 +1844,23 @@ impl Transaction {
 
 	/// Set a new save point on the transaction.
 	pub async fn new_save_point(&self) -> Result<()> {
-		Ok(self.inner.new_save_point().await.map_err(Error::from)?)
+		self.inner.new_save_point().await.map_err(Error::from)?;
+		self.quota_state.lock().await.new_save_point();
+		Ok(())
 	}
 
 	/// Release the last save point.
 	pub async fn release_last_save_point(&self) -> Result<()> {
-		Ok(self.inner.release_last_save_point().await.map_err(Error::from)?)
+		self.inner.release_last_save_point().await.map_err(Error::from)?;
+		self.quota_state.lock().await.release_last_save_point();
+		Ok(())
 	}
 
 	/// Rollback to the last save point.
 	pub async fn rollback_to_save_point(&self) -> Result<()> {
-		Ok(self.inner.rollback_to_save_point().await.map_err(Error::from)?)
+		self.inner.rollback_to_save_point().await.map_err(Error::from)?;
+		self.quota_state.lock().await.rollback_to_save_point();
+		Ok(())
 	}
 
 	// --------------------------------------------------
@@ -3346,6 +3365,11 @@ impl TableProvider for Transaction {
 	) -> BoxProviderFut<'a, Result<Arc<TableDefinition>>> {
 		Box::pin(async move {
 			let key = crate::key::database::tb::new(tb.namespace_id, tb.database_id, &tb.name);
+			if self.get(&key, None).await?.is_none() {
+				self.quota_usage(tb.namespace_id, tb.database_id)
+					.register_table_delta(&tb.name, 1)
+					.await?;
+			}
 			match self.set(&key, tb).await {
 				Ok(_) => {}
 				Err(e) => {
@@ -3396,6 +3420,9 @@ impl TableProvider for Transaction {
 			};
 
 			let key = crate::key::database::tb::new(tb.namespace_id, tb.database_id, &tb.name);
+			self.quota_usage(tb.namespace_id, tb.database_id)
+				.register_table_removal(&tb.name)
+				.await?;
 			self.del(&key).await?;
 
 			// Invalidate the cached list of all tables for this database
@@ -3427,6 +3454,9 @@ impl TableProvider for Transaction {
 			};
 
 			let key = crate::key::database::tb::new(tb.namespace_id, tb.database_id, &tb.name);
+			self.quota_usage(tb.namespace_id, tb.database_id)
+				.register_table_removal(&tb.name)
+				.await?;
 			self.clr(&key).await?;
 
 			// Invalidate the cached list of all tables for this database
@@ -3699,6 +3729,9 @@ impl TableProvider for Transaction {
 		Box::pin(async move {
 			let name = fd.name.to_raw_string();
 			let key = crate::key::table::fd::new(ns, db, tb, &name);
+			if self.get(&key, None).await?.is_none() {
+				self.quota_usage(ns, db).register_field_delta(tb, 1).await?;
+			}
 			self.set(&key, fd).await?;
 
 			// Invalidate the cached list of all fields for this table
