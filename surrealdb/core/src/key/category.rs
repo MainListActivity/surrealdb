@@ -111,6 +111,10 @@ pub enum Category {
 	DatabaseConfig,
 	/// crate::key::database::sq             /*{ns}*{db}*sq{sq}
 	DatabaseSequence,
+	/// crate::key::database::qt             /*{ns}*{db}!qt
+	DatabaseQuota,
+	/// crate::key::database::qg             /*{ns}*{db}!qg
+	DatabaseQuotaGeneration,
 	///
 	/// ------------------------------
 	///
@@ -258,6 +262,8 @@ impl Display for Category {
 			Self::DatabaseUser => "DatabaseUser",
 			Self::DatabaseVersionstamp => "DatabaseVersionstamp",
 			Self::DatabaseSequence => "DatabaseSequence",
+			Self::DatabaseQuota => "DatabaseQuota",
+			Self::DatabaseQuotaGeneration => "DatabaseQuotaGeneration",
 			Self::DatabaseConfig => "DatabaseConfig",
 			Self::TableRoot => "TableRoot",
 			Self::TableEvent => "TableEvent",

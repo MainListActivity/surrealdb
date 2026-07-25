@@ -27,6 +27,8 @@ mod multireader;
 mod multiwriter_different_keys;
 mod multiwriter_same_keys_allow;
 mod multiwriter_same_keys_conflict;
+#[cfg(feature = "kv-mem")]
+mod quota_test;
 mod raw;
 #[cfg(feature = "kv-mem")]
 mod reclaim_test;

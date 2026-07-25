@@ -16,17 +16,19 @@ use crate::expr::statements::alter::{
 	AlterBucketStatement, AlterConfigStatement, AlterDatabaseStatement, AlterDefault,
 	AlterEventStatement, AlterFieldStatement, AlterFunctionStatement, AlterIndexStatement,
 	AlterKind, AlterModuleStatement, AlterNamespaceStatement, AlterParamStatement,
-	AlterSequenceStatement, AlterSystemStatement, AlterTableStatement, AlterUserStatement,
+	AlterQuotaStatement, AlterSequenceStatement, AlterSystemStatement, AlterTableStatement,
+	AlterUserStatement,
 };
 use crate::expr::statements::define::config::ConfigInner;
 use crate::expr::statements::define::config::api::ApiConfig;
 use crate::expr::statements::define::config::defaults::DefaultConfig;
 use crate::expr::statements::define::{
-	ApiAction, DefineBucketStatement, DefineConfigStatement, DefineDefault, DefineSequenceStatement,
+	ApiAction, DefineBucketStatement, DefineConfigStatement, DefineDefault, DefineQuotaStatement,
+	DefineSequenceStatement,
 };
 use crate::expr::statements::rebuild::RebuildStatement;
 use crate::expr::statements::remove::{
-	RemoveApiStatement, RemoveBucketStatement, RemoveSequenceStatement,
+	RemoveApiStatement, RemoveBucketStatement, RemoveQuotaStatement, RemoveSequenceStatement,
 };
 use crate::expr::statements::{
 	AccessStatement, AlterStatement, CreateStatement, DefineAccessStatement,
@@ -402,6 +404,7 @@ implement_visitor! {
 			AlterStatement::Table(a)=>{ this.visit_alter_table(a)?; },
 			AlterStatement::Event(a)=>{ this.visit_alter_event(a)?; },
 			AlterStatement::Index(a) => { this.visit_alter_index(a)?; },
+			AlterStatement::Quota(a) => { this.visit_alter_quota(a)?; },
 			AlterStatement::Sequence(a) => { this.visit_alter_sequence(a)?; },
 			AlterStatement::Field(a) => { this.visit_alter_field(a)?; },
 			AlterStatement::Param(a) => { this.visit_alter_param(a)?; },
@@ -507,6 +510,11 @@ implement_visitor! {
 		if let Some(ref t) = a.timeout {
 			this.visit_expr(t)?;
 		}
+		Ok(())
+	}
+
+	fn visit_alter_quota(this, a: &AlterQuotaStatement){
+		this.visit_expr(&a.database)?;
 		Ok(())
 	}
 
@@ -716,6 +724,9 @@ implement_visitor! {
 			RemoveStatement::Bucket(r) => {
 				this.visit_remove_bucket(r)?;
 			},
+			RemoveStatement::Quota(r) => {
+				this.visit_remove_quota(r)?;
+			},
 			RemoveStatement::Sequence(r) => {
 				this.visit_remove_sequence(r)?;
 			},
@@ -808,6 +819,11 @@ implement_visitor! {
 
 	fn visit_remove_sequence(this, r: &RemoveSequenceStatement){
 		this.visit_expr(&r.name)?;
+		Ok(())
+	}
+
+	fn visit_remove_quota(this, r: &RemoveQuotaStatement){
+		this.visit_expr(&r.database)?;
 		Ok(())
 	}
 
@@ -955,6 +971,9 @@ implement_visitor! {
 			DefineStatement::Bucket(d) => {
 				this.visit_define_bucket(d)?;
 			},
+			DefineStatement::Quota(d) => {
+				this.visit_define_quota(d)?;
+			},
 			DefineStatement::Sequence(d) => {
 				this.visit_define_sequence(d)?;
 			},
@@ -970,6 +989,11 @@ implement_visitor! {
 		this.visit_expr(&d.batch)?;
 		this.visit_expr(&d.start)?;
 		this.visit_expr(&d.timeout)?;
+		Ok(())
+	}
+
+	fn visit_define_quota(this, d: &DefineQuotaStatement) {
+		this.visit_expr(&d.database)?;
 		Ok(())
 	}
 
@@ -1973,6 +1997,7 @@ implement_visitor_mut! {
 			AlterStatement::Table(a)=>{ this.visit_mut_alter_table(a)?;},
 			AlterStatement::Event(a)=>{ this.visit_mut_alter_event(a)?;},
 			AlterStatement::Index(a)=>{ this.visit_mut_alter_index(a)?;},
+			AlterStatement::Quota(a) => { this.visit_mut_alter_quota(a)?; },
 			AlterStatement::Sequence(a) => { this.visit_mut_alter_sequence(a)?; },
 			AlterStatement::Field(a) => { this.visit_mut_alter_field(a)?; },
 			AlterStatement::Param(a) => { this.visit_mut_alter_param(a)?; },
@@ -2113,6 +2138,11 @@ implement_visitor_mut! {
 		if let Some(ref mut t) = a.timeout {
 			this.visit_mut_expr(t)?;
 		}
+		Ok(())
+	}
+
+	fn visit_mut_alter_quota(this, a: &mut AlterQuotaStatement){
+		this.visit_mut_expr(&mut a.database)?;
 		Ok(())
 	}
 
@@ -2287,6 +2317,9 @@ implement_visitor_mut! {
 			RemoveStatement::Bucket(r) => {
 				this.visit_mut_remove_bucket(r)?;
 			},
+			RemoveStatement::Quota(r) => {
+				this.visit_mut_remove_quota(r)?;
+			},
 			RemoveStatement::Sequence(r) => {
 				this.visit_mut_remove_sequence(r)?;
 			},
@@ -2379,6 +2412,11 @@ implement_visitor_mut! {
 
 	fn visit_mut_remove_sequence(this, r: &mut RemoveSequenceStatement){
 		this.visit_mut_expr(&mut r.name)?;
+		Ok(())
+	}
+
+	fn visit_mut_remove_quota(this, r: &mut RemoveQuotaStatement){
+		this.visit_mut_expr(&mut r.database)?;
 		Ok(())
 	}
 
@@ -2526,6 +2564,9 @@ implement_visitor_mut! {
 			DefineStatement::Bucket(d) => {
 				this.visit_mut_define_bucket(d)?;
 			},
+			DefineStatement::Quota(d) => {
+				this.visit_mut_define_quota(d)?;
+			},
 			DefineStatement::Sequence(d) => {
 				this.visit_mut_define_sequence(d)?;
 			},
@@ -2542,6 +2583,11 @@ implement_visitor_mut! {
 		this.visit_mut_expr(&mut d.start)?;
 
 		this.visit_mut_expr(&mut d.timeout)?;
+		Ok(())
+	}
+
+	fn visit_mut_define_quota(this, d: &mut DefineQuotaStatement) {
+		this.visit_mut_expr(&mut d.database)?;
 		Ok(())
 	}
 

@@ -13,6 +13,7 @@ mod model;
 mod module;
 mod namespace;
 mod param;
+mod quota;
 mod sequence;
 mod table;
 mod user;
@@ -31,6 +32,7 @@ pub(crate) use model::RemoveModelStatement;
 pub(crate) use module::RemoveModuleStatement;
 pub(crate) use namespace::RemoveNamespaceStatement;
 pub(crate) use param::RemoveParamStatement;
+pub(crate) use quota::RemoveQuotaStatement;
 pub(crate) use sequence::RemoveSequenceStatement;
 pub(crate) use table::RemoveTableStatement;
 pub(crate) use user::RemoveUserStatement;
@@ -53,6 +55,7 @@ pub(crate) enum RemoveStatement {
 	Model(RemoveModelStatement),
 	Api(RemoveApiStatement),
 	Bucket(RemoveBucketStatement),
+	Quota(RemoveQuotaStatement),
 	Sequence(RemoveSequenceStatement),
 	Module(RemoveModuleStatement),
 	Config(RemoveConfigStatement),
@@ -75,6 +78,7 @@ impl ToSql for RemoveStatement {
 			Self::Model(v) => v.fmt_sql(f, fmt),
 			Self::Api(v) => v.fmt_sql(f, fmt),
 			Self::Bucket(v) => v.fmt_sql(f, fmt),
+			Self::Quota(v) => v.fmt_sql(f, fmt),
 			Self::Sequence(v) => v.fmt_sql(f, fmt),
 			Self::Module(v) => v.fmt_sql(f, fmt),
 			Self::Config(v) => v.fmt_sql(f, fmt),
@@ -99,6 +103,7 @@ impl From<RemoveStatement> for crate::expr::statements::RemoveStatement {
 			RemoveStatement::Model(v) => Self::Model(v.into()),
 			RemoveStatement::Api(v) => Self::Api(v.into()),
 			RemoveStatement::Bucket(v) => Self::Bucket(v.into()),
+			RemoveStatement::Quota(v) => Self::Quota(v.into()),
 			RemoveStatement::Sequence(v) => Self::Sequence(v.into()),
 			RemoveStatement::Module(v) => Self::Module(v.into()),
 			RemoveStatement::Config(v) => Self::Config(v.into()),
@@ -123,6 +128,7 @@ impl From<crate::expr::statements::RemoveStatement> for RemoveStatement {
 			crate::expr::statements::RemoveStatement::Model(v) => Self::Model(v.into()),
 			crate::expr::statements::RemoveStatement::Api(v) => Self::Api(v.into()),
 			crate::expr::statements::RemoveStatement::Bucket(v) => Self::Bucket(v.into()),
+			crate::expr::statements::RemoveStatement::Quota(v) => Self::Quota(v.into()),
 			crate::expr::statements::RemoveStatement::Sequence(v) => Self::Sequence(v.into()),
 			crate::expr::statements::RemoveStatement::Module(v) => Self::Module(v.into()),
 			crate::expr::statements::RemoveStatement::Config(v) => Self::Config(v.into()),

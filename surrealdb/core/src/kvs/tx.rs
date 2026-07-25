@@ -47,6 +47,7 @@ use crate::doc::CursorRecord;
 use crate::err::Error;
 use crate::idx::IndexKeyBase;
 use crate::idx::planner::ScanDirection;
+use crate::key::database::qt::Qt;
 use crate::key::database::sq::Sq;
 use crate::key::index::all as index_all;
 use crate::key::table::bg::Bg;
@@ -2614,6 +2615,36 @@ impl DatabaseProvider for Transaction {
 				}
 			}
 			.instrument(trace_span!(target: "surrealdb::core::kvs::tx", "all_db_sequences")),
+		)
+	}
+
+	/// Retrieve the singleton native quota policy for a database.
+	fn get_db_quota(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		version: Option<u64>,
+	) -> BoxProviderFut<'_, Result<Option<Arc<catalog::QuotaPolicyDefinition>>>> {
+		Box::pin(
+			async move {
+				let key = Qt::new(ns, db);
+				if version.is_some() {
+					return Ok(self.get(&key, version).await?.map(Arc::new));
+				}
+				let lookup = cache::tx::Lookup::Quota(ns, db);
+				match self.cache.get(&lookup) {
+					Some(value) => value.try_into_type().map(Some),
+					None => {
+						let Some(value) = self.get(&key, None).await? else {
+							return Ok(None);
+						};
+						let value = Arc::new(value);
+						self.cache.insert(lookup, cache::tx::Entry::Any(value.clone()));
+						Ok(Some(value))
+					}
+				}
+			}
+			.instrument(trace_span!(target: "surrealdb::core::kvs::tx", "get_db_quota")),
 		)
 	}
 

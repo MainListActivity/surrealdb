@@ -321,6 +321,12 @@ pub(crate) enum Error {
 		name: String,
 	},
 
+	/// The requested database quota policy does not exist
+	#[error("The quota policy for database '{database}' does not exist")]
+	QuotaNotFound {
+		database: String,
+	},
+
 	/// The requested config does not exist
 	#[error("The config for {name} does not exist")]
 	CgNotFound {
@@ -919,6 +925,44 @@ pub(crate) enum Error {
 	SeqAlreadyExists {
 		name: String,
 	},
+
+	/// The requested database quota policy already exists
+	#[error("The quota policy for database '{database}' already exists")]
+	QuotaAlreadyExists {
+		database: String,
+	},
+
+	/// A quota policy generation guard did not match
+	#[error(
+		"The quota policy for database '{database}' has generation {actual}, expected {expected}"
+	)]
+	QuotaGenerationMismatch {
+		database: String,
+		expected: u64,
+		actual: u64,
+	},
+
+	/// A quota policy mutation omitted its required generation guard
+	#[error("The quota policy for database '{database}' requires `EXPECT GENERATION`")]
+	QuotaGenerationRequired {
+		database: String,
+	},
+
+	/// A quota rule referenced by an ALTER statement does not exist
+	#[error("The quota rule '{id}' does not exist")]
+	QuotaRuleNotFound {
+		id: String,
+	},
+
+	/// A quota policy is invalid
+	#[error("Invalid quota policy: {reason}")]
+	QuotaPolicyInvalid {
+		reason: String,
+	},
+
+	/// Quota policy metadata is deliberately excluded from ordinary database imports
+	#[error("Quota policy statements are not allowed during database import")]
+	QuotaImportNotAllowed,
 
 	/// The requested table already exists
 	#[error("The table '{name}' already exists")]

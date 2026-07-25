@@ -8,10 +8,11 @@ use crate::sql::statements::alter::{
 	AlterAccessStatement, AlterAnalyzerStatement, AlterApiClause, AlterApiStatement,
 	AlterBucketStatement, AlterConfigStatement, AlterDatabaseStatement, AlterEventStatement,
 	AlterFieldStatement, AlterFunctionStatement, AlterIndexStatement, AlterKind,
-	AlterModuleStatement, AlterNamespaceStatement, AlterParamStatement, AlterSequenceStatement,
-	AlterSystemStatement, AlterUserStatement,
+	AlterModuleStatement, AlterNamespaceStatement, AlterParamStatement, AlterQuotaStatement,
+	AlterSequenceStatement, AlterSystemStatement, AlterUserStatement,
 };
 use crate::sql::statements::define::ApiAction;
+use crate::sql::statements::quota::AlterQuotaClause;
 use crate::sql::statements::{AlterStatement, AlterTableStatement};
 use crate::sql::tokenizer::Tokenizer;
 use crate::syn::error::bail;
@@ -33,6 +34,7 @@ impl Parser<'_> {
 				self.parse_alter_field(stk).await.map(|s| AlterStatement::Field(Box::new(s)))
 			}
 			t!("PARAM") => self.parse_alter_param(stk).await.map(AlterStatement::Param),
+			t!("QUOTA") => self.parse_alter_quota(stk).await.map(AlterStatement::Quota),
 			t!("SEQUENCE") => self.parse_alter_sequence(stk).await.map(AlterStatement::Sequence),
 			t!("BUCKET") => self.parse_alter_bucket(stk, next).await.map(AlterStatement::Bucket),
 			t!("ANALYZER") => self.parse_alter_analyzer(stk).await.map(AlterStatement::Analyzer),
@@ -44,6 +46,55 @@ impl Parser<'_> {
 			t!("MODULE") => self.parse_alter_module(stk).await.map(AlterStatement::Module),
 			_ => unexpected!(self, next, "a alter statement keyword"),
 		}
+	}
+
+	pub(crate) async fn parse_alter_quota(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<AlterQuotaStatement> {
+		let if_exists = if self.eat(t!("IF")) {
+			expected!(self, t!("EXISTS"));
+			true
+		} else {
+			false
+		};
+		expected!(self, t!("ON"));
+		expected!(self, t!("DATABASE"));
+		let database = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
+		expected!(self, t!("EXPECT"));
+		expected!(self, t!("GENERATION"));
+		let expected_generation = self.next_token_value()?;
+
+		let mut clauses = Vec::new();
+		loop {
+			if self.eat(t!("SET")) {
+				expected!(self, t!("RULE"));
+				clauses.push(AlterQuotaClause::Set(self.parse_quota_rule()?));
+			} else if self.eat(t!("DROP")) {
+				expected!(self, t!("RULE"));
+				let if_exists = if self.eat(t!("IF")) {
+					expected!(self, t!("EXISTS"));
+					true
+				} else {
+					false
+				};
+				clauses.push(AlterQuotaClause::Drop {
+					id: self.parse_ident()?,
+					if_exists,
+				});
+			} else {
+				break;
+			}
+		}
+		if clauses.is_empty() {
+			unexpected!(self, self.peek(), "`SET RULE` or `DROP RULE`")
+		}
+		Ok(AlterQuotaStatement {
+			database,
+			if_exists,
+			expected_generation,
+			clauses,
+		})
 	}
 
 	pub(crate) async fn parse_alter_system(

@@ -21,6 +21,7 @@ mod index;
 mod module;
 mod namespace;
 mod param;
+mod quota;
 mod sequence;
 mod system;
 mod table;
@@ -39,6 +40,7 @@ pub(crate) use index::AlterIndexStatement;
 pub(crate) use module::AlterModuleStatement;
 pub(crate) use namespace::AlterNamespaceStatement;
 pub(crate) use param::AlterParamStatement;
+pub(crate) use quota::AlterQuotaStatement;
 pub(crate) use sequence::AlterSequenceStatement;
 pub(crate) use system::AlterSystemStatement;
 pub(crate) use table::AlterTableStatement;
@@ -118,6 +120,7 @@ pub(crate) enum AlterStatement {
 	Api(AlterApiStatement),
 	Event(AlterEventStatement),
 	Index(AlterIndexStatement),
+	Quota(AlterQuotaStatement),
 	Sequence(AlterSequenceStatement),
 	Field(Box<AlterFieldStatement>),
 	Param(AlterParamStatement),
@@ -151,6 +154,7 @@ impl AlterStatement {
 			Self::Api(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Event(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Index(v) => v.compute(stk, ctx, opt, doc).await,
+			Self::Quota(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Sequence(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Field(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Param(v) => v.compute(stk, ctx, opt, doc).await,
@@ -175,6 +179,7 @@ impl ToSql for AlterStatement {
 			Self::Api(v) => v.fmt_sql(f, fmt),
 			Self::Event(v) => v.fmt_sql(f, fmt),
 			Self::Index(v) => v.fmt_sql(f, fmt),
+			Self::Quota(v) => v.fmt_sql(f, fmt),
 			Self::Sequence(v) => v.fmt_sql(f, fmt),
 			Self::Field(v) => v.fmt_sql(f, fmt),
 			Self::Param(v) => v.fmt_sql(f, fmt),

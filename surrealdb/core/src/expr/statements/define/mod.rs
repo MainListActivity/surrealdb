@@ -12,6 +12,7 @@ mod model;
 mod module;
 mod namespace;
 mod param;
+mod quota;
 mod sequence;
 mod table;
 mod user;
@@ -35,6 +36,7 @@ pub(crate) use model::DefineModelStatement;
 pub(crate) use module::DefineModuleStatement;
 pub(crate) use namespace::DefineNamespaceStatement;
 pub(crate) use param::DefineParamStatement;
+pub(crate) use quota::DefineQuotaStatement;
 use reblessive::tree::Stk;
 pub(crate) use sequence::DefineSequenceStatement;
 pub(crate) use table::DefineTableStatement;
@@ -95,6 +97,7 @@ pub(crate) enum DefineStatement {
 	Config(DefineConfigStatement),
 	Api(DefineApiStatement),
 	Bucket(DefineBucketStatement),
+	Quota(DefineQuotaStatement),
 	Sequence(DefineSequenceStatement),
 	Module(DefineModuleStatement),
 }
@@ -125,6 +128,7 @@ impl DefineStatement {
 			Self::Config(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Api(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Bucket(v) => v.compute(stk, ctx, opt, doc).await,
+			Self::Quota(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Sequence(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Module(v) => v.compute(stk, ctx, opt, doc).await,
 		}

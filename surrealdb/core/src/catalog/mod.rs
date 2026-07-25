@@ -13,6 +13,7 @@ mod database;
 mod module;
 mod namespace;
 pub(crate) mod providers;
+mod quota;
 mod record;
 mod schema;
 mod subscription;
@@ -28,6 +29,7 @@ pub(crate) use access::*;
 pub(crate) use database::*;
 pub(crate) use module::*;
 pub(crate) use namespace::*;
+pub(crate) use quota::*;
 pub(crate) use record::*;
 pub use schema::ApiMethod;
 pub(crate) use schema::{

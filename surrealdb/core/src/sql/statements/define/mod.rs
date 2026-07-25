@@ -12,6 +12,7 @@ mod model;
 mod module;
 mod namespace;
 mod param;
+mod quota;
 mod sequence;
 mod table;
 pub mod user;
@@ -30,6 +31,7 @@ pub(crate) use model::DefineModelStatement;
 pub(crate) use module::DefineModuleStatement;
 pub(crate) use namespace::DefineNamespaceStatement;
 pub(crate) use param::DefineParamStatement;
+pub(crate) use quota::DefineQuotaStatement;
 pub(crate) use sequence::DefineSequenceStatement;
 use surrealdb_types::{SqlFormat, ToSql};
 pub(crate) use table::DefineTableStatement;
@@ -83,6 +85,7 @@ pub(crate) enum DefineStatement {
 	Config(DefineConfigStatement),
 	Api(DefineApiStatement),
 	Bucket(DefineBucketStatement),
+	Quota(DefineQuotaStatement),
 	Sequence(DefineSequenceStatement),
 	#[cfg_attr(feature = "arbitrary", arbitrary(skip))]
 	Module(DefineModuleStatement),
@@ -106,6 +109,7 @@ impl ToSql for DefineStatement {
 			Self::Config(v) => v.fmt_sql(f, fmt),
 			Self::Api(v) => v.fmt_sql(f, fmt),
 			Self::Bucket(v) => v.fmt_sql(f, fmt),
+			Self::Quota(v) => v.fmt_sql(f, fmt),
 			Self::Sequence(v) => v.fmt_sql(f, fmt),
 			Self::Module(v) => v.fmt_sql(f, fmt),
 		}
@@ -130,6 +134,7 @@ impl From<DefineStatement> for crate::expr::statements::DefineStatement {
 			DefineStatement::Config(v) => Self::Config(v.into()),
 			DefineStatement::Api(v) => Self::Api(v.into()),
 			DefineStatement::Bucket(v) => Self::Bucket(v.into()),
+			DefineStatement::Quota(v) => Self::Quota(v.into()),
 			DefineStatement::Sequence(v) => Self::Sequence(v.into()),
 			DefineStatement::Module(v) => Self::Module(v.into()),
 		}
@@ -154,6 +159,7 @@ impl From<crate::expr::statements::DefineStatement> for DefineStatement {
 			crate::expr::statements::DefineStatement::Config(v) => Self::Config(v.into()),
 			crate::expr::statements::DefineStatement::Api(v) => Self::Api(v.into()),
 			crate::expr::statements::DefineStatement::Bucket(v) => Self::Bucket(v.into()),
+			crate::expr::statements::DefineStatement::Quota(v) => Self::Quota(v.into()),
 			crate::expr::statements::DefineStatement::Sequence(v) => Self::Sequence(v.into()),
 			crate::expr::statements::DefineStatement::Module(v) => Self::Module(v.into()),
 		}

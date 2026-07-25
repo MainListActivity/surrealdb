@@ -11,6 +11,7 @@ use surrealdb_types::{SqlFormat, ToSql};
 mod database;
 mod index;
 mod param;
+mod quota;
 mod sequence;
 mod user;
 
@@ -31,6 +32,7 @@ pub use index::AlterIndexStatement;
 pub use module::AlterModuleStatement;
 pub use namespace::AlterNamespaceStatement;
 pub use param::AlterParamStatement;
+pub use quota::AlterQuotaStatement;
 pub use sequence::AlterSequenceStatement;
 pub use system::AlterSystemStatement;
 pub use table::AlterTableStatement;
@@ -87,6 +89,7 @@ pub enum AlterStatement {
 	Api(AlterApiStatement),
 	Event(AlterEventStatement),
 	Index(AlterIndexStatement),
+	Quota(AlterQuotaStatement),
 	Sequence(AlterSequenceStatement),
 	Field(Box<AlterFieldStatement>),
 	Param(AlterParamStatement),
@@ -109,6 +112,7 @@ impl ToSql for AlterStatement {
 			Self::Api(v) => v.fmt_sql(f, fmt),
 			Self::Event(v) => v.fmt_sql(f, fmt),
 			Self::Index(v) => v.fmt_sql(f, fmt),
+			Self::Quota(v) => v.fmt_sql(f, fmt),
 			Self::Sequence(v) => v.fmt_sql(f, fmt),
 			Self::Field(v) => v.fmt_sql(f, fmt),
 			Self::Param(v) => v.fmt_sql(f, fmt),
@@ -133,6 +137,7 @@ impl From<AlterStatement> for crate::expr::statements::AlterStatement {
 			AlterStatement::Api(v) => Self::Api(v.into()),
 			AlterStatement::Event(v) => Self::Event(v.into()),
 			AlterStatement::Index(v) => Self::Index(v.into()),
+			AlterStatement::Quota(v) => Self::Quota(v.into()),
 			AlterStatement::Sequence(v) => Self::Sequence(v.into()),
 			AlterStatement::Field(v) => Self::Field(Box::new((*v).into())),
 			AlterStatement::Param(v) => Self::Param(v.into()),
@@ -157,6 +162,7 @@ impl From<crate::expr::statements::AlterStatement> for AlterStatement {
 			crate::expr::statements::AlterStatement::Api(v) => Self::Api(v.into()),
 			crate::expr::statements::AlterStatement::Event(v) => Self::Event(v.into()),
 			crate::expr::statements::AlterStatement::Index(v) => Self::Index(v.into()),
+			crate::expr::statements::AlterStatement::Quota(v) => Self::Quota(v.into()),
 			crate::expr::statements::AlterStatement::Sequence(v) => Self::Sequence(v.into()),
 			crate::expr::statements::AlterStatement::Field(v) => Self::Field(Box::new((*v).into())),
 			crate::expr::statements::AlterStatement::Param(v) => Self::Param(v.into()),

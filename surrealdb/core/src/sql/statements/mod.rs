@@ -11,6 +11,7 @@ pub(crate) mod kill;
 pub(crate) mod live;
 pub(crate) mod option;
 pub(crate) mod output;
+pub(crate) mod quota;
 pub(crate) mod rebuild;
 pub(crate) mod relate;
 pub(crate) mod remove;

@@ -49,6 +49,8 @@ pub(crate) enum Lookup<'a> {
 	Pas(NamespaceId, DatabaseId),
 	/// A cache key for sequences (on a database)
 	Sqs(NamespaceId, DatabaseId),
+	/// A cache key for the singleton quota policy (on a database)
+	Quota(NamespaceId, DatabaseId),
 	/// A cache key for tables
 	Tbs(NamespaceId, DatabaseId),
 	/// A cache key for the database-wide reference-target summary consumed by
@@ -148,6 +150,7 @@ impl Equivalent<Key> for Lookup<'_> {
 			(Self::Cgs(la, lb), Key::Cgs(ka, kb)) => la == ka && lb == kb,
 			(Self::Pas(la, lb), Key::Pas(ka, kb)) => la == ka && lb == kb,
 			(Self::Sqs(la, lb), Key::Sqs(ka, kb)) => la == ka && lb == kb,
+			(Self::Quota(la, lb), Key::Quota(ka, kb)) => la == ka && lb == kb,
 			(Self::Tbs(la, lb), Key::Tbs(ka, kb)) => la == ka && lb == kb,
 			(Self::DbReferenceTargets(la, lb), Key::DbReferenceTargets(ka, kb)) => la == ka && lb == kb,
 			(Self::Evs(la, lb, lc), Key::Evs(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
@@ -287,6 +290,11 @@ mod tests {
 	#[case(Lookup::Cg(NamespaceId(1), DatabaseId(1), "test"), Key::Cg(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
 	#[case(Lookup::Pa(NamespaceId(1), DatabaseId(1), "test"), Key::Pa(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
 	#[case(Lookup::Sq(NamespaceId(1), DatabaseId(1), "test"), Key::Sq(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
+	#[case(
+		Lookup::Quota(NamespaceId(1), DatabaseId(1)),
+		Key::Quota(NamespaceId(1), DatabaseId(1)),
+		true
+	)]
 	#[case(Lookup::Tb(NamespaceId(1), DatabaseId(1), "test"), Key::Tb(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
 	#[case(Lookup::TbByName("test", "test", "test"), Key::TbByName("test".to_string(), "test".to_string(), "test".to_string()), true)]
 	#[case(Lookup::Ev(NamespaceId(1), DatabaseId(1), "test", "test"), Key::Ev(NamespaceId(1), DatabaseId(1), "test".to_string(), "test".to_string()), true)]

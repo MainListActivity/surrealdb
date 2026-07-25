@@ -9,6 +9,8 @@ pub mod fc;
 pub mod md;
 pub mod ml;
 pub mod pa;
+pub mod qg;
+pub mod qt;
 pub mod sq;
 pub mod tb;
 pub mod th;

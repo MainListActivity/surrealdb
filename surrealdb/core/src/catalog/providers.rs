@@ -226,6 +226,14 @@ pub(crate) trait DatabaseProvider: NamespaceProvider {
 		version: Option<u64>,
 	) -> BoxProviderFut<'_, Result<Arc<[catalog::SequenceDefinition]>>>;
 
+	/// Retrieve the singleton native quota policy for a database.
+	fn get_db_quota(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		version: Option<u64>,
+	) -> BoxProviderFut<'_, Result<Option<Arc<catalog::QuotaPolicyDefinition>>>>;
+
 	/// Retrieve all function definitions for a specific database.
 	fn all_db_functions(
 		&self,

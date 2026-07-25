@@ -12,6 +12,7 @@ mod model;
 mod module;
 mod namespace;
 mod param;
+mod quota;
 mod sequence;
 mod table;
 mod user;
@@ -31,6 +32,7 @@ pub(crate) use model::RemoveModelStatement;
 pub(crate) use module::RemoveModuleStatement;
 pub(crate) use namespace::RemoveNamespaceStatement;
 pub(crate) use param::RemoveParamStatement;
+pub(crate) use quota::RemoveQuotaStatement;
 use reblessive::tree::Stk;
 pub(crate) use sequence::RemoveSequenceStatement;
 pub(crate) use table::RemoveTableStatement;
@@ -61,6 +63,7 @@ pub(crate) enum RemoveStatement {
 	Model(RemoveModelStatement),
 	Api(RemoveApiStatement),
 	Bucket(RemoveBucketStatement),
+	Quota(RemoveQuotaStatement),
 	Sequence(RemoveSequenceStatement),
 	Module(RemoveModuleStatement),
 	Config(RemoveConfigStatement),
@@ -90,6 +93,7 @@ impl RemoveStatement {
 			Self::Model(v) => v.compute(ctx, opt).await,
 			Self::Api(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Bucket(v) => v.compute(stk, ctx, opt, doc).await,
+			Self::Quota(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Sequence(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Module(v) => v.compute(ctx, opt).await,
 			Self::Config(v) => v.compute(ctx, opt).await,

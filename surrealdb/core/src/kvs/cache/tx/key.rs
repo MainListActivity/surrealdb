@@ -53,6 +53,8 @@ pub(crate) enum Key {
 	DbReferenceTargets(NamespaceId, DatabaseId),
 	/// A cache key for sequences (on a database)
 	Sqs(NamespaceId, DatabaseId),
+	/// A cache key for the singleton quota policy (on a database)
+	Quota(NamespaceId, DatabaseId),
 	/// A cache key for events (on a table)
 	Evs(NamespaceId, DatabaseId, String),
 	/// A cache key for fieds (on a table)
@@ -147,6 +149,7 @@ impl<'a> From<Lookup<'a>> for Key {
 			Lookup::Cgs(a, b) => Key::Cgs(a, b),
 			Lookup::Pas(a, b) => Key::Pas(a, b),
 			Lookup::Sqs(a, b) => Key::Sqs(a, b),
+			Lookup::Quota(a, b) => Key::Quota(a, b),
 			Lookup::Tbs(a, b) => Key::Tbs(a, b),
 			Lookup::DbReferenceTargets(a, b) => Key::DbReferenceTargets(a, b),
 			Lookup::Evs(a, b, c) => Key::Evs(a, b, c.to_string()),

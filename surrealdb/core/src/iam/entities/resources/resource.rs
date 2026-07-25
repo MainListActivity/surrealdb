@@ -35,6 +35,8 @@ pub enum ResourceKind {
 	Sequence,
 	// IAM
 	Actor,
+	#[revision(start = 5)]
+	Quota,
 }
 
 #[revisioned(revision = 1)]
@@ -80,6 +82,7 @@ impl std::fmt::Display for ResourceKind {
 			ResourceKind::Config(c) => write!(f, "Config::{c}"),
 			ResourceKind::Bucket => write!(f, "Bucket"),
 			ResourceKind::Sequence => write!(f, "Sequence"),
+			ResourceKind::Quota => write!(f, "Quota"),
 		}
 	}
 }

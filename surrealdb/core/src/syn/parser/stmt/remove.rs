@@ -2,7 +2,7 @@ use reblessive::Stk;
 
 use crate::sql::statements::remove::{
 	RemoveAnalyzerStatement, RemoveApiStatement, RemoveBucketStatement, RemoveConfigKind,
-	RemoveConfigStatement, RemoveModuleStatement, RemoveSequenceStatement,
+	RemoveConfigStatement, RemoveModuleStatement, RemoveQuotaStatement, RemoveSequenceStatement,
 };
 use crate::sql::statements::{
 	RemoveAccessStatement, RemoveDatabaseStatement, RemoveEventStatement, RemoveFieldStatement,
@@ -66,6 +66,25 @@ impl Parser<'_> {
 					name,
 					if_exists,
 					expunge,
+				})
+			}
+			t!("QUOTA") => {
+				let if_exists = if self.eat(t!("IF")) {
+					expected!(self, t!("EXISTS"));
+					true
+				} else {
+					false
+				};
+				expected!(self, t!("ON"));
+				expected!(self, t!("DATABASE"));
+				let database = stk.run(|stk| self.parse_expr_field(stk)).await?;
+				expected!(self, t!("EXPECT"));
+				expected!(self, t!("GENERATION"));
+				let expected_generation = self.next_token_value()?;
+				RemoveStatement::Quota(RemoveQuotaStatement {
+					database,
+					if_exists,
+					expected_generation,
 				})
 			}
 			t!("FUNCTION") => {

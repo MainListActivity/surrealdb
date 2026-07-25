@@ -354,7 +354,23 @@ pub(crate) fn expr_required_context(expr: &Expr) -> ContextLevel {
 		| Expr::Relate(_)
 		| Expr::Insert(_) => ContextLevel::Database,
 
-		// DDL statements need a database
+		// A quota policy targets a database from the selected namespace. Other
+		// DDL statements retain their existing database-context requirement.
+		Expr::Define(statement)
+			if matches!(statement.as_ref(), crate::expr::statements::DefineStatement::Quota(_)) =>
+		{
+			ContextLevel::Namespace
+		}
+		Expr::Alter(statement)
+			if matches!(statement.as_ref(), crate::expr::statements::AlterStatement::Quota(_)) =>
+		{
+			ContextLevel::Namespace
+		}
+		Expr::Remove(statement)
+			if matches!(statement.as_ref(), crate::expr::statements::RemoveStatement::Quota(_)) =>
+		{
+			ContextLevel::Namespace
+		}
 		Expr::Define(_) | Expr::Remove(_) | Expr::Alter(_) | Expr::Rebuild(_) => {
 			ContextLevel::Database
 		}

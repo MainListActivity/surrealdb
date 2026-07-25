@@ -17,9 +17,10 @@ use crate::sql::statements::define::{
 	ApiAction, DefineAccessStatement, DefineAnalyzerStatement, DefineApiStatement,
 	DefineBucketStatement, DefineConfigStatement, DefineDatabaseStatement, DefineDefault,
 	DefineEventStatement, DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement,
-	DefineKind, DefineNamespaceStatement, DefineParamStatement, DefineSequenceStatement,
-	DefineStatement, DefineTableStatement, DefineUserStatement,
+	DefineKind, DefineNamespaceStatement, DefineParamStatement, DefineQuotaStatement,
+	DefineSequenceStatement, DefineStatement, DefineTableStatement, DefineUserStatement,
 };
+use crate::sql::statements::quota::{QuotaLimit, QuotaResource, QuotaRule, QuotaSelector};
 use crate::sql::tokenizer::Tokenizer;
 use crate::sql::{
 	AccessType, DefineModuleStatement, Expr, Index, Kind, Literal, Param, Permission, Permissions,
@@ -72,10 +73,83 @@ impl Parser<'_> {
 			t!("ACCESS") => self.parse_define_access(stk).await.map(DefineStatement::Access),
 			t!("CONFIG") => self.parse_define_config(stk).await.map(DefineStatement::Config),
 			t!("BUCKET") => self.parse_define_bucket(stk, next).await.map(DefineStatement::Bucket),
+			t!("QUOTA") => self.parse_define_quota(stk).await.map(DefineStatement::Quota),
 			t!("SEQUENCE") => self.parse_define_sequence(stk).await.map(DefineStatement::Sequence),
 			t!("MODULE") => self.parse_define_module(stk).await.map(DefineStatement::Module),
 			_ => unexpected!(self, next, "a define statement keyword"),
 		}
+	}
+
+	pub(crate) async fn parse_define_quota(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<DefineQuotaStatement> {
+		let kind = if self.eat(t!("IF")) {
+			expected!(self, t!("NOT"));
+			expected!(self, t!("EXISTS"));
+			DefineKind::IfNotExists
+		} else if self.eat(t!("OVERWRITE")) {
+			DefineKind::Overwrite
+		} else {
+			DefineKind::Default
+		};
+		expected!(self, t!("ON"));
+		expected!(self, t!("DATABASE"));
+		let database = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
+		let expected_generation = if self.eat(t!("EXPECT")) {
+			expected!(self, t!("GENERATION"));
+			Some(self.next_token_value::<u64>()?)
+		} else {
+			None
+		};
+		if expected_generation.is_some() && kind != DefineKind::Overwrite {
+			bail!(
+				"`EXPECT GENERATION` is only valid with `DEFINE QUOTA OVERWRITE`",
+				@self.recent_span()
+			)
+		}
+
+		let mut rules = Vec::new();
+		while self.eat(t!("RULE")) {
+			rules.push(self.parse_quota_rule()?);
+		}
+		Ok(DefineQuotaStatement {
+			kind,
+			database,
+			expected_generation,
+			rules,
+		})
+	}
+
+	pub(super) fn parse_quota_rule(&mut self) -> ParseResult<QuotaRule> {
+		let id = self.parse_ident()?;
+		expected!(self, t!("FOR"));
+		let next = self.next();
+		let resource = match next.kind {
+			t!("TABLE") => QuotaResource::Table,
+			t!("FIELD") => QuotaResource::Field,
+			t!("RECORD") => QuotaResource::Record,
+			_ => unexpected!(self, next, "`TABLE`, `FIELD`, or `RECORD`"),
+		};
+		expected!(self, t!("MATCH"));
+		let next = self.next();
+		let selector = match next.kind {
+			t!("EXACT") => QuotaSelector::Exact(self.parse_ident()?),
+			t!("REGEX") => QuotaSelector::Regex(self.next_token_value()?),
+			_ => unexpected!(self, next, "`EXACT` or `REGEX`"),
+		};
+		expected!(self, t!("LIMIT"));
+		let limit = if self.eat(t!("UNLIMITED")) {
+			QuotaLimit::Unlimited
+		} else {
+			QuotaLimit::Finite(self.next_token_value()?)
+		};
+		Ok(QuotaRule {
+			id,
+			resource,
+			selector,
+			limit,
+		})
 	}
 
 	pub(crate) async fn parse_define_namespace(

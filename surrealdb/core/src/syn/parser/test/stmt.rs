@@ -1,6 +1,7 @@
 use chrono::offset::TimeZone;
 use chrono::{NaiveDate, Offset, Utc};
 use surrealdb_strand::Strand;
+use surrealdb_types::ToSql;
 
 use crate::catalog::EventKind;
 use crate::sql::access::AccessDuration;
@@ -55,6 +56,50 @@ use crate::val::range::TypedRange;
 
 fn ident_field(name: &str) -> Expr {
 	Expr::Idiom(Idiom(vec![Part::Field(name.into())]))
+}
+
+#[test]
+fn parse_quota_statements_round_trip() {
+	let cases = [
+		"DEFINE QUOTA ON DATABASE app RULE ent_tables FOR TABLE MATCH REGEX /^ent/ LIMIT 12 RULE user_fields FOR FIELD MATCH EXACT user LIMIT UNLIMITED RULE user_records FOR RECORD MATCH EXACT user LIMIT 1000",
+		"DEFINE QUOTA IF NOT EXISTS ON DATABASE app",
+		"DEFINE QUOTA OVERWRITE ON DATABASE app EXPECT GENERATION 7 RULE records FOR RECORD MATCH REGEX /^ent/ LIMIT 100",
+		"ALTER QUOTA IF EXISTS ON DATABASE app EXPECT GENERATION 7 SET RULE records FOR RECORD MATCH REGEX /^ent/ LIMIT 200 DROP RULE IF EXISTS old_rule",
+		"REMOVE QUOTA IF EXISTS ON DATABASE app EXPECT GENERATION 8",
+	];
+
+	for sql in cases {
+		let parsed =
+			syn::parse_with(sql.as_bytes(), async |parser, stk| parser.parse_query(stk).await)
+				.unwrap();
+		assert_eq!(parsed.to_sql(), format!("{sql};"));
+	}
+}
+
+#[test]
+fn quota_statement_expr_revision_round_trip() {
+	let sql = "ALTER QUOTA ON DATABASE app EXPECT GENERATION 7 SET RULE records FOR RECORD MATCH REGEX /^ent/ LIMIT 200 DROP RULE IF EXISTS old_rule";
+	let parsed =
+		syn::parse_with(sql.as_bytes(), async |parser, stk| parser.parse_expr(stk).await).unwrap();
+	let expr: crate::expr::Expr = parsed.into();
+	let encoded = revision::to_vec(&expr).unwrap();
+	let decoded: crate::expr::Expr = revision::from_slice(&encoded).unwrap();
+	assert_eq!(decoded.to_sql(), sql);
+}
+
+#[test]
+fn reject_invalid_quota_syntax() {
+	for sql in [
+		"DEFINE QUOTA ON DATABASE app RULE records FOR RECORD MATCH EXACT $table LIMIT 10",
+		"DEFINE QUOTA ON DATABASE app RULE records FOR RECORD MATCH EXACT user LIMIT -1",
+		"DEFINE QUOTA ON DATABASE app RULE records FOR USER MATCH EXACT user LIMIT 10",
+	] {
+		assert!(
+			syn::parse_with(sql.as_bytes(), async |parser, stk| parser.parse_query(stk).await)
+				.is_err(),
+			"unexpectedly parsed: {sql}"
+		);
+	}
 }
 
 #[test]
