@@ -12,6 +12,7 @@ pub enum InfoStatement {
 	Ns(bool, Option<Expr>),
 	Db(bool, Option<Expr>),
 	Tb(Expr, bool, Option<Expr>),
+	Quota(Expr, bool),
 	User(Expr, Option<Base>, bool),
 	Index(Expr, Expr, bool),
 }
@@ -73,6 +74,15 @@ impl ToSql for InfoStatement {
 				),
 				None => write_sql!(f, sql_fmt, "INFO FOR TABLE {} STRUCTURE", CoverStmts(t)),
 			},
+			Self::Quota(database, false) => {
+				write_sql!(f, sql_fmt, "INFO FOR QUOTA ON DATABASE {}", CoverStmts(database))
+			}
+			Self::Quota(database, true) => write_sql!(
+				f,
+				sql_fmt,
+				"INFO FOR QUOTA ON DATABASE {} STRUCTURE",
+				CoverStmts(database)
+			),
 			Self::User(u, b, false) => match b {
 				Some(b) => write_sql!(f, sql_fmt, "INFO FOR USER {} ON {b}", CoverStmts(u)),
 				None => write_sql!(f, sql_fmt, "INFO FOR USER {}", CoverStmts(u)),
@@ -106,6 +116,7 @@ impl From<InfoStatement> for crate::expr::statements::InfoStatement {
 			InfoStatement::Ns(v, ver) => Self::Ns(v, ver.map(From::from)),
 			InfoStatement::Db(v, ver) => Self::Db(v, ver.map(From::from)),
 			InfoStatement::Tb(t, v, ver) => Self::Tb(t.into(), v, ver.map(From::from)),
+			InfoStatement::Quota(database, v) => Self::Quota(database.into(), v),
 			InfoStatement::User(u, b, v) => Self::User(u.into(), b.map(Into::into), v),
 			InfoStatement::Index(i, t, v) => Self::Index(i.into(), t.into(), v),
 		}
@@ -122,6 +133,9 @@ impl From<crate::expr::statements::InfoStatement> for InfoStatement {
 			crate::expr::statements::InfoStatement::Db(v, ver) => Self::Db(v, ver.map(From::from)),
 			crate::expr::statements::InfoStatement::Tb(t, v, ver) => {
 				Self::Tb(t.into(), v, ver.map(From::from))
+			}
+			crate::expr::statements::InfoStatement::Quota(database, v) => {
+				Self::Quota(database.into(), v)
 			}
 			crate::expr::statements::InfoStatement::User(u, b, v) => {
 				Self::User(u.into(), b.map(Into::into), v)

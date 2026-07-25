@@ -1,19 +1,22 @@
 use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::fmt::{EscapeKwFreeIdent, EscapeKwIdent};
+use crate::fmt::{CoverStmts, EscapeKwFreeIdent, EscapeKwIdent};
+use crate::sql::Expr;
 use crate::val::TableName;
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum RebuildStatement {
 	Index(RebuildIndexStatement),
+	Quota(RebuildQuotaStatement),
 }
 
 impl ToSql for RebuildStatement {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
 			Self::Index(v) => v.fmt_sql(f, fmt),
+			Self::Quota(v) => v.fmt_sql(f, fmt),
 		}
 	}
 }
@@ -22,6 +25,7 @@ impl From<RebuildStatement> for crate::expr::statements::rebuild::RebuildStateme
 	fn from(v: RebuildStatement) -> Self {
 		match v {
 			RebuildStatement::Index(v) => Self::Index(v.into()),
+			RebuildStatement::Quota(v) => Self::Quota(v.into()),
 		}
 	}
 }
@@ -30,6 +34,42 @@ impl From<crate::expr::statements::rebuild::RebuildStatement> for RebuildStateme
 	fn from(v: crate::expr::statements::rebuild::RebuildStatement) -> Self {
 		match v {
 			crate::expr::statements::rebuild::RebuildStatement::Index(v) => Self::Index(v.into()),
+			crate::expr::statements::rebuild::RebuildStatement::Quota(v) => Self::Quota(v.into()),
+		}
+	}
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+pub struct RebuildQuotaStatement {
+	pub database: Expr,
+	pub if_needed: bool,
+}
+
+impl ToSql for RebuildQuotaStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		f.push_str("REBUILD QUOTA");
+		if self.if_needed {
+			f.push_str(" IF NEEDED");
+		}
+		write_sql!(f, fmt, " ON DATABASE {}", CoverStmts(&self.database));
+	}
+}
+
+impl From<RebuildQuotaStatement> for crate::expr::statements::rebuild::RebuildQuotaStatement {
+	fn from(value: RebuildQuotaStatement) -> Self {
+		Self {
+			database: value.database.into(),
+			if_needed: value.if_needed,
+		}
+	}
+}
+
+impl From<crate::expr::statements::rebuild::RebuildQuotaStatement> for RebuildQuotaStatement {
+	fn from(value: crate::expr::statements::rebuild::RebuildQuotaStatement) -> Self {
+		Self {
+			database: value.database.into(),
+			if_needed: value.if_needed,
 		}
 	}
 }

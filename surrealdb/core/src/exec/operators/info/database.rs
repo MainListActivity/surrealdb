@@ -31,6 +31,8 @@ use crate::exec::{
 };
 use crate::expr::statements::info::InfoStructure;
 use crate::iam::{Action, ResourceKind};
+use crate::key::database::qg::Qg;
+use crate::kvs::quota::quota_summary_value;
 use crate::val::{Datetime, Object, Value};
 
 /// Database INFO operator.
@@ -145,6 +147,9 @@ async fn execute_database_info(
 
 	// Get the transaction
 	let txn = ctx.txn();
+	let quota_policy = txn.get_db_quota(ns, db, None).await?;
+	let quota_generation = txn.get(&Qg::new(ns, db), None).await?;
+	let quota = quota_summary_value(quota_policy.as_deref(), quota_generation);
 
 	// Create the result set
 	if structured {
@@ -157,6 +162,7 @@ async fn execute_database_info(
 			"modules" => crate::expr::statements::info::process_modules(ctx.ctx(), ns, db, txn.all_db_modules(ns, db, version).await?).await,
 			"models" => process(&txn.all_db_models(ns, db, version).await?),
 			"params" => process(&txn.all_db_params(ns, db, version).await?),
+			"quota" => quota.clone(),
 			"tables" => process(&txn.all_tb(ns, db, version).await?),
 			"users" => process(&txn.all_db_users(ns, db, version).await?),
 			"configs" => process(&txn.all_db_configs(ns, db, version).await?),
@@ -221,6 +227,7 @@ async fn execute_database_info(
 				}
 				out.into()
 			},
+			"quota" => quota,
 			"tables" => {
 				let mut out = Object::default();
 				for v in txn.all_tb(ns, db, version).await?.iter() {

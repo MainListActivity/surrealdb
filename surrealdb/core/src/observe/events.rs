@@ -46,6 +46,95 @@ impl<T, E> From<&Result<T, E>> for Outcome {
 	}
 }
 
+/// Bounded native-quota operation classification.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub enum QuotaEventKind {
+	/// Transactional admission of a protected mutation.
+	Admission,
+	/// `DEFINE QUOTA`.
+	Define,
+	/// `ALTER QUOTA`.
+	Alter,
+	/// `REMOVE QUOTA`.
+	Remove,
+	/// `REBUILD QUOTA`.
+	Rebuild,
+}
+
+impl QuotaEventKind {
+	/// Stable low-cardinality metric label.
+	pub const fn as_label(self) -> &'static str {
+		match self {
+			Self::Admission => "admission",
+			Self::Define => "define",
+			Self::Alter => "alter",
+			Self::Remove => "remove",
+			Self::Rebuild => "rebuild",
+		}
+	}
+}
+
+/// Bounded outcome of a native-quota operation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub enum QuotaEventOutcome {
+	/// A policy or rebuild changed durable state.
+	Changed,
+	/// An idempotent operation made no change.
+	Noop,
+	/// Admission rejected a transaction because a limit was exceeded.
+	Denied,
+	/// Admission lost a retryable conditional race.
+	Conflict,
+	/// An operation failed for another reason.
+	Error,
+}
+
+impl QuotaEventOutcome {
+	/// Stable low-cardinality metric label.
+	pub const fn as_label(self) -> &'static str {
+		match self {
+			Self::Changed => "changed",
+			Self::Noop => "noop",
+			Self::Denied => "denied",
+			Self::Conflict => "conflict",
+			Self::Error => "error",
+		}
+	}
+}
+
+/// Safe half of a native-quota event.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct QuotaEventSafe {
+	/// Fixed operation category.
+	pub kind: QuotaEventKind,
+	/// Fixed outcome category.
+	pub outcome: QuotaEventOutcome,
+	/// Duration for rebuild operations.
+	pub duration: Option<Duration>,
+}
+
+/// Context half of a native-quota event.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct QuotaEventCtx {
+	/// Correlation identifier returned to the control plane.
+	pub operation_id: Option<String>,
+	/// Namespace containing the target database.
+	pub namespace: Option<String>,
+	/// Target database.
+	pub database: Option<String>,
+	/// Authenticated actor.
+	pub actor: Option<String>,
+}
+
+/// Structured native-quota audit and metrics event.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct QuotaEvent {
+	/// Bounded data safe for metric attributes.
+	pub safe: QuotaEventSafe,
+	/// Identifying data reserved for logs and authenticated audit sinks.
+	pub ctx: QuotaEventCtx,
+}
+
 /// Bounded classification for a single SurrealQL statement.
 ///
 /// All variants are fixed at compile time so using this as a metric attribute

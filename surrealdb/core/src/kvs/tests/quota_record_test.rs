@@ -704,7 +704,8 @@ async fn concurrent_clients_fill_exactly_the_remaining_record_slots() {
 						}
 						assert!(
 							message.contains("Transaction conflict")
-								|| message.contains("failed transaction"),
+								|| message.contains("failed transaction")
+								|| message.contains("Quota admission conflicted"),
 							"unexpected concurrent create error: {message}"
 						);
 						tokio::task::yield_now().await;

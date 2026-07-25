@@ -11,8 +11,8 @@
 use std::sync::Arc;
 
 use super::events::{
-	AuthEvent, HttpRequestEvent, HttpRequestStartEvent, NetworkBytesEvent, QueryEvent, RpcEvent,
-	SessionEvent, StatementEvent, TransactionEvent,
+	AuthEvent, HttpRequestEvent, HttpRequestStartEvent, NetworkBytesEvent, QueryEvent, QuotaEvent,
+	RpcEvent, SessionEvent, StatementEvent, TransactionEvent,
 };
 use super::observer::ExecutionObserver;
 
@@ -71,6 +71,12 @@ impl ExecutionObserver for FanOutObserver {
 	fn on_transaction_complete(&self, event: &TransactionEvent) {
 		for o in &self.observers {
 			o.on_transaction_complete(event);
+		}
+	}
+
+	fn on_quota_event(&self, event: &QuotaEvent) {
+		for o in &self.observers {
+			o.on_quota_event(event);
 		}
 	}
 

@@ -26,6 +26,7 @@ mod code {
 	pub const QUERY_TIMEDOUT: i64 = -32004;
 	pub const QUERY_CANCELLED: i64 = -32005;
 	pub const QUERY_TRANSACTION_CONFLICT: i64 = -32009;
+	pub const QUOTA_ERROR: i64 = -32010;
 	pub const THROWN: i64 = -32006;
 	pub const SERIALIZATION_ERROR: i64 = -32007;
 	pub const DESERIALIZATION_ERROR: i64 = -32008;
@@ -263,6 +264,16 @@ impl Error {
 		}
 	}
 
+	/// Native quota admission, policy, or ledger error.
+	pub fn quota(message: String, details: QuotaError) -> Self {
+		Self {
+			message,
+			code: code::QUOTA_ERROR,
+			details: ErrorDetails::Quota(Box::new(details)),
+			cause: None,
+		}
+	}
+
 	/// Internal or unexpected error (server or client). Sets wire code for RPC.
 	pub fn internal(message: String) -> Self {
 		Self {
@@ -491,6 +502,14 @@ impl Error {
 			_ => None,
 		}
 	}
+
+	/// Returns the stable native quota error contract, if present.
+	pub fn quota_details(&self) -> Option<&QuotaError> {
+		match &self.details {
+			ErrorDetails::Quota(details) => Some(details),
+			_ => None,
+		}
+	}
 }
 
 // -----------------------------------------------------------------------------
@@ -531,6 +550,8 @@ pub enum ErrorDetails {
 	AlreadyExists(Option<AlreadyExistsError>),
 	/// Client connection error (SDK-side).
 	Connection(Option<ConnectionError>),
+	/// Native quota error with stable code, retryability, and safe details.
+	Quota(Box<QuotaError>),
 	/// User-thrown error (THROW in SurrealQL). No detail type.
 	Thrown,
 	/// Internal/unexpected error. No detail type.
@@ -553,6 +574,7 @@ impl ErrorDetails {
 			Self::NotFound(_) => "NotFound",
 			Self::AlreadyExists(_) => "AlreadyExists",
 			Self::Connection(_) => "Connection",
+			Self::Quota(_) => "Quota",
 			Self::Thrown => "Thrown",
 			Self::Internal => "Internal",
 			Self::Context => "Context",
@@ -591,6 +613,10 @@ impl ErrorDetails {
 	pub fn is_connection(&self) -> bool {
 		matches!(self, Self::Connection(_))
 	}
+	/// Returns true if this is a native quota error.
+	pub fn is_quota(&self) -> bool {
+		matches!(self, Self::Quota(_))
+	}
 	/// Returns true if this is a user-thrown error.
 	pub fn is_thrown(&self) -> bool {
 		matches!(self, Self::Thrown)
@@ -616,6 +642,7 @@ impl ErrorDetails {
 			"NotFound" => Self::NotFound(None),
 			"AlreadyExists" => Self::AlreadyExists(None),
 			"Connection" => Self::Connection(None),
+			"Quota" => Self::Internal,
 			"Thrown" => Self::Thrown,
 			"Context" => Self::Context,
 			// Unknown kinds fall back to Internal (forward compat)
@@ -647,6 +674,9 @@ impl ErrorDetails {
 			"Connection" => {
 				ConnectionError::from_value(value).map(|v| ErrorDetails::Connection(Some(v)))
 			}
+			"Quota" => {
+				QuotaError::from_value(value).map(|value| ErrorDetails::Quota(Box::new(value)))
+			}
 			"Thrown" => Ok(Self::Thrown),
 			"Context" => Ok(Self::Context),
 			_ => Ok(Self::Internal),
@@ -664,6 +694,7 @@ impl ErrorDetails {
 			Self::NotFound(d) => d.is_some(),
 			Self::AlreadyExists(d) => d.is_some(),
 			Self::Connection(d) => d.is_some(),
+			Self::Quota(_) => true,
 			Self::Thrown | Self::Internal | Self::Context => false,
 		}
 	}
@@ -672,6 +703,41 @@ impl ErrorDetails {
 // -----------------------------------------------------------------------------
 // Structured error details (wire format in Error.details)
 // -----------------------------------------------------------------------------
+
+/// Stable native quota error envelope.
+#[derive(Clone, Debug, Default, PartialEq, Eq, SurrealValue)]
+#[surreal(crate = "crate")]
+pub struct QuotaError {
+	code: String,
+	retryable: bool,
+	details: Value,
+}
+
+impl QuotaError {
+	/// Construct a safe quota error envelope.
+	pub fn new(code: impl Into<String>, retryable: bool, details: Value) -> Self {
+		Self {
+			code: code.into(),
+			retryable,
+			details,
+		}
+	}
+
+	/// Stable machine-readable quota error code.
+	pub fn code(&self) -> &str {
+		&self.code
+	}
+
+	/// Whether retrying the same operation may succeed without administrator action.
+	pub fn retryable(&self) -> bool {
+		self.retryable
+	}
+
+	/// Redacted, code-specific machine details.
+	pub fn details(&self) -> &Value {
+		&self.details
+	}
+}
 
 /// Auth failure reason for [`ErrorKind::NotAllowed`] errors.
 #[derive(Clone, Debug, PartialEq, Eq, SurrealValue)]

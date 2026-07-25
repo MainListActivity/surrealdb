@@ -1,8 +1,8 @@
 //! The [`ExecutionObserver`] trait and the no-op default implementation.
 
 use super::events::{
-	AuthEvent, HttpRequestEvent, HttpRequestStartEvent, NetworkBytesEvent, QueryEvent, RpcEvent,
-	SessionEvent, StatementEvent, TransactionEvent,
+	AuthEvent, HttpRequestEvent, HttpRequestStartEvent, NetworkBytesEvent, QueryEvent, QuotaEvent,
+	RpcEvent, SessionEvent, StatementEvent, TransactionEvent,
 };
 
 /// Hook surface for receiving structured observability events from the core
@@ -26,6 +26,9 @@ pub trait ExecutionObserver: Send + Sync + 'static {
 
 	/// Called when a transaction is committed or cancelled.
 	fn on_transaction_complete(&self, _event: &TransactionEvent) {}
+
+	/// Called after a native-quota decision or committed control-plane operation.
+	fn on_quota_event(&self, _event: &QuotaEvent) {}
 
 	/// Called when an RPC method invocation completes.
 	fn on_rpc_complete(&self, _event: &RpcEvent) {}
@@ -102,7 +105,8 @@ mod tests {
 		HttpRequestEvent, HttpRequestEventCtx, HttpRequestEventSafe, HttpRequestStartEvent,
 		HttpRequestStartEventSafe, HttpVersion, NetworkBytesEvent, NetworkBytesEventCtx,
 		NetworkBytesEventSafe, NetworkDirection, Outcome, QueryCounters, QueryEvent, QueryEventCtx,
-		QueryEventSafe, RpcEvent, RpcEventCtx, RpcEventSafe, SessionAction, SessionEvent,
+		QueryEventSafe, QuotaEvent, QuotaEventCtx, QuotaEventKind, QuotaEventOutcome,
+		QuotaEventSafe, RpcEvent, RpcEventCtx, RpcEventSafe, SessionAction, SessionEvent,
 		SessionEventCtx, SessionEventSafe, SessionProtocol, StatementEvent, StatementEventCtx,
 		StatementEventSafe, StatementType, TransactionEvent, TransactionEventCtx,
 		TransactionEventSafe, TransactionMetricsSnapshot,
@@ -148,6 +152,14 @@ mod tests {
 				error_class: None,
 			},
 			ctx: TransactionEventCtx::default(),
+		});
+		obs.on_quota_event(&QuotaEvent {
+			safe: QuotaEventSafe {
+				kind: QuotaEventKind::Admission,
+				outcome: QuotaEventOutcome::Denied,
+				duration: None,
+			},
+			ctx: QuotaEventCtx::default(),
 		});
 		obs.on_rpc_complete(&RpcEvent {
 			safe: RpcEventSafe {

@@ -62,7 +62,8 @@ pub use graph::{
 };
 pub use ifelse::IfElsePlan;
 pub use info::{
-	DatabaseInfoPlan, IndexInfoPlan, NamespaceInfoPlan, RootInfoPlan, TableInfoPlan, UserInfoPlan,
+	DatabaseInfoPlan, IndexInfoPlan, NamespaceInfoPlan, QuotaInfoPlan, RootInfoPlan, TableInfoPlan,
+	UserInfoPlan,
 };
 #[cfg_attr(not(feature = "gql"), allow(unused_imports))]
 pub use join::{HashJoin, JoinType};

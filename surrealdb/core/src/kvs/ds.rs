@@ -4116,6 +4116,7 @@ impl Datastore {
 			self.index_stores.clone(),
 			self.index_builder.clone(),
 			self.sequences.clone(),
+			self.transaction_factory.clone(),
 			Arc::clone(&self.cache),
 			Arc::clone(&self.function_registry),
 			#[cfg(feature = "http")]

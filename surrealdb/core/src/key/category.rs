@@ -117,6 +117,8 @@ pub enum Category {
 	DatabaseQuota,
 	/// crate::key::database::qg             /*{ns}*{db}!qg
 	DatabaseQuotaGeneration,
+	/// crate::key::database::ql             /*{ns}*{db}!ql
+	DatabaseQuotaLatestChange,
 	/// crate::key::database::qm             /*{ns}*{db}!qm
 	DatabaseQuotaUsageMeta,
 	/// crate::key::database::qub            /*{ns}*{db}!qu{epoch}!tb{generation}{rule}
@@ -277,6 +279,7 @@ impl Display for Category {
 			Self::DatabaseSequence => "DatabaseSequence",
 			Self::DatabaseQuota => "DatabaseQuota",
 			Self::DatabaseQuotaGeneration => "DatabaseQuotaGeneration",
+			Self::DatabaseQuotaLatestChange => "DatabaseQuotaLatestChange",
 			Self::DatabaseQuotaUsageMeta => "DatabaseQuotaUsageMeta",
 			Self::DatabaseQuotaTableBucket => "DatabaseQuotaTableBucket",
 			Self::DatabaseQuotaFieldUsage => "DatabaseQuotaFieldUsage",

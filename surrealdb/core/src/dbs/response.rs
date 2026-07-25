@@ -328,7 +328,7 @@ impl<'de> Deserialize<'de> for QueryResult {
 
 #[cfg(test)]
 mod tests {
-	use surrealdb_types::{AuthError, NotAllowedError, NotFoundError, ValidationError};
+	use surrealdb_types::{AuthError, NotAllowedError, NotFoundError, QuotaError, ValidationError};
 
 	use super::*;
 
@@ -432,6 +432,50 @@ mod tests {
 		let err = parsed.result.unwrap_err();
 		assert!(err.is_validation());
 		assert_eq!(err.validation_details(), Some(&ValidationError::Parse));
+	}
+
+	#[test]
+	fn query_result_error_round_trip_preserves_quota_contract() {
+		let err = TypesError::quota(
+			"Quota exceeded".into(),
+			QuotaError::new(
+				"quota_exceeded",
+				false,
+				Value::Object(object! {
+					database: "app",
+					generation: 3_u64,
+					violations: Value::Array(Default::default()),
+					truncated: false,
+				}),
+			),
+		);
+		let val = error_query_result(err).into_value();
+		let Value::Object(wire) = &val else {
+			panic!("expected query-result object");
+		};
+		assert_eq!(wire.get("kind"), Some(&Value::String("Quota".into())));
+		let Some(Value::Object(envelope)) = wire.get("details") else {
+			panic!("expected quota envelope in HTTP/WebSocket query-result details");
+		};
+		assert_eq!(envelope.get("code"), Some(&Value::String("quota_exceeded".into())));
+		assert_eq!(envelope.get("retryable"), Some(&Value::Bool(false)));
+		assert!(matches!(envelope.get("details"), Some(Value::Object(_))));
+
+		let parsed = QueryResult::from_value(val).expect("round-trip should succeed");
+		let err = parsed.result.unwrap_err();
+		let quota = err.quota_details().expect("quota details should survive query-result wire");
+
+		assert_eq!(quota.code(), "quota_exceeded");
+		assert!(!quota.retryable());
+		assert_eq!(
+			quota.details(),
+			&Value::Object(object! {
+				database: "app",
+				generation: 3_u64,
+				violations: Value::Array(Default::default()),
+				truncated: false,
+			})
+		);
 	}
 
 	#[test]

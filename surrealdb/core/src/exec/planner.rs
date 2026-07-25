@@ -84,8 +84,8 @@ use crate::exec::ExecOperator;
 use crate::exec::function::FunctionRegistry;
 use crate::exec::operators::{
 	AnalyzePlan, DatabaseInfoPlan, ExplainPlan, ExprPlan, Fetch, ForeachPlan, IfElsePlan,
-	IndexInfoPlan, NamespaceInfoPlan, ReturnPlan, RootInfoPlan, SequencePlan, SleepPlan,
-	TableInfoPlan, UserInfoPlan,
+	IndexInfoPlan, NamespaceInfoPlan, QuotaInfoPlan, ReturnPlan, RootInfoPlan, SequencePlan,
+	SleepPlan, TableInfoPlan, UserInfoPlan,
 };
 use crate::exec::physical_expr::{
 	ArrayLiteral, BinaryOp, BlockPhysicalExpr, BuiltinFunctionExec, ClosureCallExec, ClosureExec,
@@ -1405,6 +1405,10 @@ impl<'ctx> Planner<'ctx> {
 				};
 				Ok(Arc::new(TableInfoPlan::new(table, structured, version))
 					as Arc<dyn ExecOperator>)
+			}
+			InfoStatement::Quota(database, structured) => {
+				let database = self.physical_expr_as_name(database).await?;
+				Ok(Arc::new(QuotaInfoPlan::new(database, structured)) as Arc<dyn ExecOperator>)
 			}
 			InfoStatement::User(user, base, structured) => {
 				let user = self.physical_expr_as_name(user).await?;

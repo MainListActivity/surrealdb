@@ -324,4 +324,7 @@ async fn ordinary_database_export_excludes_quota_policy() {
 	export_result.unwrap();
 	let sql = String::from_utf8(bytes).unwrap();
 	assert!(!sql.contains("QUOTA"), "{sql}");
+	assert!(!sql.contains("operation_id"), "{sql}");
+	assert!(!sql.contains("ledger_state"), "{sql}");
+	assert!(!sql.contains("active_epoch"), "{sql}");
 }

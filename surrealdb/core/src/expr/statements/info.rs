@@ -15,7 +15,9 @@ use crate::err::Error;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, FlowResultExt};
 use crate::iam::{Action, ResourceKind};
+use crate::key::database::qg::Qg;
 use crate::kvs::index::index_building_info;
+use crate::kvs::quota::quota_summary_value;
 use crate::sys::INFORMATION;
 use crate::val::{Datetime, Object, TableName, Value};
 
@@ -29,6 +31,8 @@ pub(crate) enum InfoStatement {
 	Db(bool, Option<Expr>),
 	/// Table information
 	Tb(Expr, bool, Option<Expr>),
+	/// Native quota policy and usage information for a database.
+	Quota(Expr, bool),
 
 	User(Expr, Option<Base>, bool),
 	/// Index information
@@ -189,6 +193,9 @@ impl InfoStatement {
 					_ => None,
 				};
 				// Create the result set
+				let quota_policy = txn.get_db_quota(ns, db, None).await?;
+				let quota_generation = txn.get(&Qg::new(ns, db), None).await?;
+				let quota = quota_summary_value(quota_policy.as_deref(), quota_generation);
 				let res = if *structured {
 					let object = map! {
 						"accesses" => process(&txn.all_db_accesses(ns, db, version).await?),
@@ -199,6 +206,7 @@ impl InfoStatement {
 						"modules" => process_modules(ctx, ns, db, txn.all_db_modules(ns, db, version).await?).await,
 						"models" => process(&txn.all_db_models(ns, db, version).await?),
 						"params" => process(&txn.all_db_params(ns, db, version).await?),
+						"quota" => quota.clone(),
 						"tables" => process(&txn.all_tb(ns, db, version).await?),
 						"users" => process(&txn.all_db_users(ns, db, version).await?),
 						"configs" => process(&txn.all_db_configs(ns, db, version).await?),
@@ -263,6 +271,7 @@ impl InfoStatement {
 							}
 							out.into()
 						},
+						"quota" => quota,
 						"tables" => {
 							let mut out = Object::default();
 							for v in txn.all_tb(ns, db, version).await?.iter() {
@@ -364,6 +373,36 @@ impl InfoStatement {
 						},
 					})
 				})
+			}
+			InfoStatement::Quota(database, structured) => {
+				let namespace = opt.ns()?;
+				let database =
+					expr_to_ident(stk, ctx, opt, doc, database, "quota database name").await?;
+				let base = if opt.db().is_ok_and(|selected| selected == database) {
+					Base::Db
+				} else {
+					Base::Ns
+				};
+				ctx.is_allowed(opt, Action::View, ResourceKind::Quota, base)?;
+				let txn = ctx.tx();
+				let db =
+					txn.get_db_by_name(namespace, &database, None).await?.ok_or_else(|| {
+						Error::DbNotFound {
+							name: database.clone(),
+						}
+					})?;
+				let policy = txn.get_db_quota(db.namespace_id, db.database_id, None).await?;
+				if *structured {
+					let tables = txn.all_tb(db.namespace_id, db.database_id, None).await?;
+					txn.quota_usage(db.namespace_id, db.database_id)
+						.info_structure(&database, policy.as_deref(), &tables)
+						.await
+				} else {
+					Ok(policy
+						.as_deref()
+						.map(|policy| Value::from(policy.to_sql()))
+						.unwrap_or(Value::None))
+				}
 			}
 			InfoStatement::User(user, base, structured) => {
 				// Get the base type

@@ -48,11 +48,11 @@ use crate::iam::{Action, ResourceKind};
 use crate::idx::planner::executor::QueryExecutor;
 use crate::idx::planner::{IterationStage, QueryPlanner};
 use crate::idx::trees::store::IndexStores;
-use crate::kvs::Transaction;
 use crate::kvs::cache::ds::DatastoreCache;
 use crate::kvs::index::IndexBuilder;
 use crate::kvs::sequences::Sequences;
 use crate::kvs::slowlog::SlowLog;
+use crate::kvs::{Transaction, TransactionFactory};
 use crate::mem::ALLOC;
 use crate::sql::expression::convert_public_value_to_internal;
 #[cfg(feature = "surrealism")]
@@ -101,6 +101,8 @@ pub struct Context {
 	index_builder: Option<IndexBuilder>,
 	// The sequences
 	sequences: Option<Sequences>,
+	// Factory for maintenance operations which require independently committed transactions.
+	transaction_factory: Option<TransactionFactory>,
 	// Capabilities
 	capabilities: Arc<Capabilities>,
 	#[cfg(storage)]
@@ -185,6 +187,7 @@ impl Context {
 			cache: None,
 			index_builder: None,
 			sequences: None,
+			transaction_factory: None,
 			#[cfg(storage)]
 			temporary_directory: None,
 			transaction: None,
@@ -242,6 +245,7 @@ impl Context {
 			cache: parent.cache.clone(),
 			index_builder: parent.index_builder.clone(),
 			sequences: parent.sequences.clone(),
+			transaction_factory: parent.transaction_factory.clone(),
 			#[cfg(storage)]
 			temporary_directory: parent.temporary_directory.clone(),
 			transaction: parent.transaction.clone(),
@@ -286,6 +290,7 @@ impl Context {
 			cache: parent.cache.clone(),
 			index_builder: parent.index_builder.clone(),
 			sequences: parent.sequences.clone(),
+			transaction_factory: parent.transaction_factory.clone(),
 			#[cfg(storage)]
 			temporary_directory: parent.temporary_directory.clone(),
 			transaction: parent.transaction.clone(),
@@ -347,6 +352,7 @@ impl Context {
 			cache: from.cache.clone(),
 			index_builder: from.index_builder.clone(),
 			sequences: from.sequences.clone(),
+			transaction_factory: from.transaction_factory.clone(),
 			#[cfg(storage)]
 			temporary_directory: from.temporary_directory.clone(),
 			transaction: from.transaction.clone(),
@@ -399,6 +405,7 @@ impl Context {
 			cache: from.cache.clone(),
 			index_builder: None,
 			sequences: from.sequences.clone(),
+			transaction_factory: from.transaction_factory.clone(),
 			#[cfg(storage)]
 			temporary_directory: from.temporary_directory.clone(),
 			transaction: None,
@@ -437,6 +444,7 @@ impl Context {
 		index_stores: IndexStores,
 		index_builder: IndexBuilder,
 		sequences: Sequences,
+		transaction_factory: TransactionFactory,
 		cache: Arc<DatastoreCache>,
 		function_registry: Arc<FunctionRegistry>,
 		#[cfg(feature = "http")] http_client: Arc<HttpClient>,
@@ -461,6 +469,7 @@ impl Context {
 			cache: Some(cache),
 			index_builder: Some(index_builder),
 			sequences: Some(sequences),
+			transaction_factory: Some(transaction_factory),
 			#[cfg(storage)]
 			temporary_directory,
 			transaction: None,
@@ -508,6 +517,7 @@ impl Context {
 			cache: None,
 			index_builder: None,
 			sequences: None,
+			transaction_factory: None,
 			#[cfg(storage)]
 			temporary_directory: None,
 			transaction: None,
@@ -881,6 +891,15 @@ impl Context {
 		} else {
 			bail!(Error::Internal("Sequences are not supported in this context.".to_string(),))
 		}
+	}
+
+	pub(crate) fn try_get_transaction_factory(&self) -> Result<&TransactionFactory> {
+		self.transaction_factory.as_ref().ok_or_else(|| {
+			Error::Internal(
+				"Independent transactions are not supported in this context.".to_owned(),
+			)
+			.into()
+		})
 	}
 
 	// Get the current datastore cache

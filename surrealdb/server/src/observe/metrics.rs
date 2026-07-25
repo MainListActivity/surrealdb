@@ -49,8 +49,8 @@ use opentelemetry::KeyValue;
 use opentelemetry::metrics::{Counter, Histogram, UpDownCounter};
 use surrealdb_core::observe::{
 	AuthEvent, ExecutionObserver, HttpRequestEvent, HttpRequestStartEvent, NetworkBytesEvent,
-	NetworkDirection, QueryEvent, RpcEvent, SessionAction, SessionEvent, StatementEvent,
-	TransactionEvent, process_snapshot,
+	NetworkDirection, QueryEvent, QuotaEvent, RpcEvent, SessionAction, SessionEvent,
+	StatementEvent, TransactionEvent, process_snapshot,
 };
 
 use super::instruments::{NONE_LABEL, attrs, names, scope};
@@ -101,6 +101,9 @@ pub struct MetricsObserver {
 	// Query (scope: surrealdb.query)
 	query_total: Counter<u64>,
 	query_duration: Histogram<f64>,
+	// Native quota (scope: surrealdb.quota)
+	quota_operation_total: Counter<u64>,
+	quota_rebuild_duration: Histogram<f64>,
 	// Transaction (scope: surrealdb.transaction)
 	transaction_total: Counter<u64>,
 	transaction_duration: Histogram<f64>,
@@ -162,6 +165,7 @@ impl MetricsObserver {
 	pub fn new(runtime: &ObservabilityRuntime) -> anyhow::Result<Self> {
 		let stmt = runtime.meter(scope::STATEMENT);
 		let qry = runtime.meter(scope::QUERY);
+		let quota = runtime.meter(scope::QUOTA);
 		let tx = runtime.meter(scope::TRANSACTION);
 		let rpc = runtime.meter(scope::RPC);
 		let auth = runtime.meter(scope::AUTH);
@@ -198,6 +202,17 @@ impl MetricsObserver {
 			query_duration: qry
 				.f64_histogram(names::QUERY_DURATION)
 				.with_description("Distribution of query batch latency")
+				.with_unit("s")
+				.build(),
+			quota_operation_total: quota
+				.u64_counter(names::QUOTA_OPERATION_TOTAL)
+				.with_description(
+					"Cumulative native-quota decisions and control-plane operation outcomes",
+				)
+				.build(),
+			quota_rebuild_duration: quota
+				.f64_histogram(names::QUOTA_REBUILD_DURATION)
+				.with_description("Distribution of native quota ledger rebuild latency")
 				.with_unit("s")
 				.build(),
 			transaction_total: tx
@@ -625,6 +640,19 @@ impl ExecutionObserver for MetricsObserver {
 		self.query_duration.record(event.safe.duration.as_secs_f64(), &attrs);
 	}
 
+	fn on_quota_event(&self, event: &QuotaEvent) {
+		// Deliberately omit namespace, database, actor, table, and rule
+		// identifiers. This family is safe from unbounded tenant cardinality.
+		let attrs = [
+			KeyValue::new(attrs::QUOTA_OPERATION, event.safe.kind.as_label()),
+			KeyValue::new(attrs::OUTCOME, event.safe.outcome.as_label()),
+		];
+		self.quota_operation_total.add(1, &attrs);
+		if let Some(duration) = event.safe.duration {
+			self.quota_rebuild_duration.record(duration.as_secs_f64(), &attrs);
+		}
+	}
+
 	fn on_transaction_complete(&self, event: &TransactionEvent) {
 		let outcome = event.safe.outcome.as_label();
 		let write = if event.safe.write {
@@ -834,9 +862,10 @@ mod tests {
 		HttpMethod, HttpRequestEvent, HttpRequestEventCtx, HttpRequestEventSafe,
 		HttpRequestStartEvent, HttpRequestStartEventSafe, HttpVersion, NetworkBytesEvent,
 		NetworkBytesEventCtx, NetworkBytesEventSafe, NetworkDirection, Outcome, QueryCounters,
-		QueryEvent, QueryEventCtx, QueryEventSafe, RpcEvent, RpcEventCtx, RpcEventSafe,
-		SessionAction, SessionEvent, SessionEventCtx, SessionEventSafe, SessionProtocol,
-		StatementEvent, StatementEventCtx, StatementEventSafe, StatementType, TransactionEvent,
+		QueryEvent, QueryEventCtx, QueryEventSafe, QuotaEvent, QuotaEventCtx, QuotaEventKind,
+		QuotaEventOutcome, QuotaEventSafe, RpcEvent, RpcEventCtx, RpcEventSafe, SessionAction,
+		SessionEvent, SessionEventCtx, SessionEventSafe, SessionProtocol, StatementEvent,
+		StatementEventCtx, StatementEventSafe, StatementType, TransactionEvent,
 		TransactionEventCtx, TransactionEventSafe, TransactionMetricsSnapshot,
 	};
 
@@ -1009,6 +1038,45 @@ mod tests {
 				"missing `{instrument}` under `{expected_scope}`: {names:?}",
 			);
 		}
+		provider.shutdown().expect("shutdown");
+	}
+
+	#[tokio::test]
+	async fn quota_metrics_use_only_bounded_safe_labels() {
+		const CANARY: &str = "tenant-canary-must-not-be-a-quota-label";
+		let (provider, reader, runtime) = fresh_runtime();
+		let obs = MetricsObserver::new(&runtime).expect("observer");
+		obs.on_quota_event(&QuotaEvent {
+			safe: QuotaEventSafe {
+				kind: QuotaEventKind::Rebuild,
+				outcome: QuotaEventOutcome::Changed,
+				duration: Some(Duration::from_millis(12)),
+			},
+			ctx: QuotaEventCtx {
+				operation_id: Some(CANARY.into()),
+				namespace: Some(CANARY.into()),
+				database: Some(CANARY.into()),
+				actor: Some(CANARY.into()),
+			},
+		});
+
+		let names = collect_names(&reader);
+		assert!(
+			names.iter().any(|(scope_name, name)| {
+				scope_name == scope::QUOTA && name == names::QUOTA_OPERATION_TOTAL
+			}),
+			"missing native quota operation counter: {names:?}"
+		);
+		assert!(
+			names.iter().any(|(scope_name, name)| {
+				scope_name == scope::QUOTA && name == names::QUOTA_REBUILD_DURATION
+			}),
+			"missing native quota rebuild histogram: {names:?}"
+		);
+		assert!(
+			!any_attr_value_contains(&reader, CANARY),
+			"quota metrics must not expose operation or tenant identifiers"
+		);
 		provider.shutdown().expect("shutdown");
 	}
 

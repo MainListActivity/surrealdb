@@ -607,6 +607,10 @@ implement_visitor! {
 	}
 
 	fn visit_rebuild(this, r: &RebuildStatement){
+		match r {
+			RebuildStatement::Index(_) => {}
+			RebuildStatement::Quota(statement) => this.visit_expr(&statement.database)?,
+		}
 		Ok(())
 	}
 
@@ -880,6 +884,9 @@ implement_visitor! {
 				if let Some(e) = expr1.as_ref(){
 					this.visit_expr(e)?;
 				}
+			},
+			InfoStatement::Quota(database, _) => {
+				this.visit_expr(database)?;
 			},
 			InfoStatement::User(expr, base, _) => {
 				this.visit_expr(expr)?;
@@ -2200,6 +2207,10 @@ implement_visitor_mut! {
 	}
 
 	fn visit_mut_rebuild(this, r: &mut RebuildStatement){
+		match r {
+			RebuildStatement::Index(_) => {}
+			RebuildStatement::Quota(statement) => this.visit_mut_expr(&mut statement.database)?,
+		}
 		Ok(())
 	}
 
@@ -2473,6 +2484,9 @@ implement_visitor_mut! {
 				if let Some(e) = expr1.as_mut(){
 					this.visit_mut_expr(e)?;
 				}
+			},
+			InfoStatement::Quota(database, _) => {
+				this.visit_mut_expr(database)?;
 			},
 			InfoStatement::User(expr, base, _) => {
 				this.visit_mut_expr(expr)?;

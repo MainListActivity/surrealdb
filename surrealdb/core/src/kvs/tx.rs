@@ -72,8 +72,8 @@ use crate::kvs::{
 };
 use crate::lq::writer::LiveEventBuffer;
 use crate::observe::{
-	ExecutionObserver, Outcome, TenantIdentity, TransactionEvent, TransactionEventSafe,
-	TransactionMetrics,
+	ExecutionObserver, Outcome, QuotaEvent, QuotaEventCtx, QuotaEventKind, QuotaEventOutcome,
+	QuotaEventSafe, TenantIdentity, TransactionEvent, TransactionEventSafe, TransactionMetrics,
 };
 use crate::val::{RecordId, RecordIdKey, TableName};
 
@@ -168,6 +168,8 @@ pub struct Transaction {
 	pending_uncommitted_index_builds: Mutex<Vec<PendingUncommittedIndexBuild>>,
 	/// Signed quota deltas buffered until this transaction commits.
 	pub(crate) quota_state: Mutex<Box<QuotaTransactionState>>,
+	/// Native-quota audit events emitted only after this transaction commits.
+	pending_quota_events: Mutex<Vec<QuotaEvent>>,
 }
 
 const INDEX_BUILD_RESERVATION_RELEASE_RETRY_SLEEP: Duration = Duration::from_millis(100);
@@ -794,6 +796,56 @@ impl Transaction {
 			pending_index_builder_aborts: Mutex::new(Vec::new()),
 			pending_uncommitted_index_builds: Mutex::new(Vec::new()),
 			quota_state: Mutex::new(Box::default()),
+			pending_quota_events: Mutex::new(Vec::new()),
+		}
+	}
+
+	/// Queue a native-quota audit event for post-commit emission.
+	pub(crate) async fn queue_quota_event(&self, event: QuotaEvent) {
+		self.pending_quota_events.lock().await.push(event);
+	}
+
+	/// Emit a native-quota event to structured logs and configured observers.
+	pub(crate) fn emit_quota_event(&self, event: &QuotaEvent) {
+		tracing::info!(
+			target: "surrealdb::core::quota",
+			operation = event.safe.kind.as_label(),
+			outcome = event.safe.outcome.as_label(),
+			operation_id = event.ctx.operation_id.as_deref().unwrap_or("-"),
+			namespace = event.ctx.namespace.as_deref().unwrap_or("-"),
+			database = event.ctx.database.as_deref().unwrap_or("-"),
+			actor = event.ctx.actor.as_deref().unwrap_or("-"),
+			duration_ms = event.safe.duration.map(|duration| duration.as_millis() as u64),
+			"native quota operation"
+		);
+		self.observer.on_quota_event(event);
+	}
+
+	async fn emit_pending_quota_events(&self) {
+		let events = std::mem::take(&mut *self.pending_quota_events.lock().await);
+		for event in events {
+			self.emit_quota_event(&event);
+		}
+	}
+
+	async fn clear_pending_quota_events(&self) {
+		self.pending_quota_events.lock().await.clear();
+	}
+
+	fn quota_admission_event(&self, outcome: QuotaEventOutcome) -> QuotaEvent {
+		let identity = self.tenant_identity.get();
+		QuotaEvent {
+			safe: QuotaEventSafe {
+				kind: QuotaEventKind::Admission,
+				outcome,
+				duration: None,
+			},
+			ctx: QuotaEventCtx {
+				operation_id: None,
+				namespace: identity.and_then(|value| value.namespace.clone()),
+				database: identity.and_then(|value| value.database.clone()),
+				actor: identity.and_then(|value| value.user.clone()),
+			},
 		}
 	}
 
@@ -1063,6 +1115,7 @@ impl Transaction {
 		if let Some(live_events) = self.live_events.get() {
 			live_events.clear();
 		}
+		self.clear_pending_quota_events().await;
 		// Cancel the underlying transactor. Emit a transaction event on
 		// either outcome so counters and durations are always reported
 		// even when cancel itself reports a driver-level error.
@@ -1083,6 +1136,16 @@ impl Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn commit(&self) -> Result<()> {
 		if let Err(e) = self.flush_quota_usage().await {
+			if matches!(e.downcast_ref::<Error>(), Some(Error::QuotaExceeded(_))) {
+				let event = self.quota_admission_event(QuotaEventOutcome::Denied);
+				tracing::warn!(
+					target: "surrealdb::core::quota",
+					error_code = "quota_exceeded",
+					"native quota admission denied"
+				);
+				self.emit_quota_event(&event);
+			}
+			self.clear_pending_quota_events().await;
 			if let Err(err) = self.cancel().await {
 				tracing::warn!(
 					target: "surrealdb::core::kvs::tx",
@@ -1095,6 +1158,7 @@ impl Transaction {
 		// `cancel`, which itself emits the transaction event, so avoid
 		// double-emission from this path.
 		if let Err(e) = self.store_changes().await {
+			self.clear_pending_quota_events().await;
 			if let Err(err) = self.cancel().await {
 				tracing::warn!(
 					target: "surrealdb::core::kvs::tx",
@@ -1108,6 +1172,8 @@ impl Transaction {
 		}
 		// Commit the transaction
 		if let Err(e) = self.tr.commit().await {
+			let quota_conflict = self.has_flushed_quota_admission().await
+				&& (e.is_retryable() || matches!(&e, KvsError::TransactionConditionNotMet));
 			let cleanup_result = self.cleanup_uncommitted_index_builds().await;
 			let release_result = self.release_index_build_reservations().await;
 			self.discard_index_builder_aborts().await;
@@ -1139,6 +1205,18 @@ impl Transaction {
 			}
 			// The cleanup error is secondary here. Callers need the commit
 			// error so retryable transaction conflicts keep their retry path.
+			if quota_conflict {
+				let event = self.quota_admission_event(QuotaEventOutcome::Conflict);
+				tracing::warn!(
+					target: "surrealdb::core::quota",
+					error_code = "quota_conflict",
+					"native quota admission conflicted"
+				);
+				self.emit_quota_event(&event);
+				self.clear_pending_quota_events().await;
+				return Err(Error::QuotaConflict.into());
+			}
+			self.clear_pending_quota_events().await;
 			anyhow::bail!(e);
 		}
 		if let Err(err) = self.release_index_build_reservations().await {
@@ -1149,6 +1227,7 @@ impl Transaction {
 		}
 		self.discard_uncommitted_index_builds().await;
 		self.run_index_builder_aborts().await;
+		self.emit_pending_quota_events().await;
 		if self.trigger_async_event.load(Ordering::Relaxed) {
 			// Notify after commit so queued events are visible to workers.
 			self.async_event_trigger.notify_one();

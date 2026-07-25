@@ -13,7 +13,7 @@ use crate::sql::statements::quota::{
 	QuotaLimit as SqlQuotaLimit, QuotaResource as SqlQuotaResource, QuotaRule as SqlQuotaRule,
 	QuotaSelector as SqlQuotaSelector,
 };
-use crate::val::Regex;
+use crate::val::{Datetime, Regex};
 
 /// Current format revision of native quota policies.
 pub(crate) const QUOTA_POLICY_FORMAT_REVISION: u16 = 1;
@@ -79,6 +79,24 @@ pub struct QuotaPolicyDefinition {
 }
 
 impl_kv_value_revisioned!(QuotaPolicyDefinition);
+
+/// Durable pointer to the latest committed quota-policy change.
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct QuotaPolicyChange {
+	/// Correlation identifier returned by the mutating operation.
+	pub operation_id: String,
+	/// Stable action label (`define`, `alter`, or `remove`).
+	pub action: String,
+	/// Authenticated actor identifier.
+	pub actor: String,
+	/// Commit-time policy generation, including remove tombstones.
+	pub generation: u64,
+	/// Time at which the change was staged in the committing transaction.
+	pub changed_at: Datetime,
+}
+
+impl_kv_value_revisioned!(QuotaPolicyChange);
 
 impl QuotaPolicyDefinition {
 	/// Construct and validate a canonical policy snapshot.

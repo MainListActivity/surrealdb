@@ -7,7 +7,8 @@ use std::error::Error as StdError;
 
 use surrealdb_types::{
 	AlreadyExistsError, AuthError, ConfigurationError, ConnectionError, Error as TypesError,
-	NotAllowedError, NotFoundError, QueryError, SerializationError, ToSql, ValidationError,
+	NotAllowedError, NotFoundError, QueryError, QuotaError, SerdeWrapper, SerializationError,
+	SurrealValue, ToSql, ValidationError, Value,
 };
 
 use crate::err::Error;
@@ -316,6 +317,160 @@ pub fn into_types_error(error: Error) -> TypesError {
 			| KvsError::CompactionNotSupported => TypesError::internal(message),
 		},
 
+		QuotaAlreadyExists {
+			database,
+		} => TypesError::quota(
+			message,
+			QuotaError::new(
+				"quota_policy_exists",
+				false,
+				Value::Object(surrealdb_types::object! {
+					database: database,
+				}),
+			),
+		),
+		QuotaNotFound {
+			database,
+		} => TypesError::quota(
+			message,
+			QuotaError::new(
+				"quota_policy_not_found",
+				false,
+				Value::Object(surrealdb_types::object! {
+					database: database,
+				}),
+			),
+		),
+		QuotaGenerationMismatch {
+			database,
+			expected,
+			actual,
+		} => TypesError::quota(
+			message,
+			QuotaError::new(
+				"quota_generation_mismatch",
+				false,
+				Value::Object(surrealdb_types::object! {
+					database: database,
+					expected: expected,
+					actual: actual,
+				}),
+			),
+		),
+		QuotaGenerationRequired {
+			database,
+		} => TypesError::quota(
+			message,
+			QuotaError::new(
+				"quota_generation_required",
+				false,
+				Value::Object(surrealdb_types::object! {
+					database: database,
+				}),
+			),
+		),
+		QuotaRuleNotFound {
+			id,
+		} => TypesError::quota(
+			message,
+			QuotaError::new(
+				"quota_rule_not_found",
+				false,
+				Value::Object(surrealdb_types::object! {
+					rule_id: id,
+				}),
+			),
+		),
+		QuotaPolicyInvalid {
+			reason,
+		} => TypesError::quota(
+			message,
+			QuotaError::new(
+				"quota_policy_invalid",
+				false,
+				Value::Object(surrealdb_types::object! {
+					reason: reason,
+				}),
+			),
+		),
+		QuotaImportNotAllowed => TypesError::quota(
+			message,
+			QuotaError::new("quota_import_not_allowed", false, Value::Object(Default::default())),
+		),
+		QuotaUsageInvalid {
+			..
+		} => TypesError::quota(
+			message,
+			QuotaError::new(
+				"quota_ledger_unavailable",
+				false,
+				Value::Object(surrealdb_types::object! {
+					state: "corrupt",
+				}),
+			),
+		),
+		QuotaUsageNotReady {
+			state,
+		} => {
+			let retryable = state == "rebuilding";
+			TypesError::quota(
+				message,
+				QuotaError::new(
+					"quota_ledger_unavailable",
+					retryable,
+					Value::Object(surrealdb_types::object! {
+						state: state,
+					}),
+				),
+			)
+		}
+		QuotaConflict => TypesError::quota(
+			message,
+			QuotaError::new("quota_conflict", true, Value::Object(Default::default())),
+		),
+		QuotaPolicyChanged {
+			database,
+			expected,
+			actual,
+		} => TypesError::quota(
+			message,
+			QuotaError::new(
+				"quota_policy_changed",
+				true,
+				Value::Object(surrealdb_types::object! {
+					database: database,
+					expected: expected,
+					actual: actual,
+				}),
+			),
+		),
+		QuotaExceeded(details) => {
+			let violations = details
+				.violations
+				.into_iter()
+				.map(|violation| {
+					let delta = SerdeWrapper(violation.delta).into_value();
+					Value::Object(surrealdb_types::object! {
+						resource: violation.resource,
+						table: violation.table,
+						rule_ids: vec![violation.rule],
+						limit: violation.limit,
+						current: violation.current,
+						delta: delta,
+						projected: violation.projected,
+						over_by: violation.over_by,
+					})
+				})
+				.collect::<Vec<_>>();
+			let safe_details = Value::Object(surrealdb_types::object! {
+				database: details.database,
+				generation: details.generation,
+				violations: Value::Array(violations.into()),
+				truncated: details.truncated,
+			});
+			TypesError::quota(message, QuotaError::new("quota_exceeded", false, safe_details))
+		}
+
 		// Internal and everything else
 		Internal(..) => TypesError::internal(message),
 		Unimplemented(..) => TypesError::internal(message),
@@ -335,9 +490,149 @@ pub fn into_types_error(error: Error) -> TypesError {
 		_ => TypesError::internal(message),
 	};
 
+	if let Some(quota) = mapped.quota_details() {
+		tracing::warn!(
+			target: "surrealdb::core::quota",
+			error_code = quota.code(),
+			retryable = quota.retryable(),
+			"native quota operation failed"
+		);
+	}
+
 	if let Some(cause) = source {
 		mapped.with_cause(cause)
 	} else {
 		mapped
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use surrealdb_types::{ErrorDetails, SurrealValue, Value};
+
+	use super::*;
+	use crate::err::{QuotaExceededError, QuotaViolation};
+
+	fn assert_quota_error(error: Error, code: &str, retryable: bool) -> TypesError {
+		let mapped = into_types_error(error);
+		let quota = mapped.quota_details().expect("expected quota error details");
+		assert_eq!(quota.code(), code);
+		assert_eq!(quota.retryable(), retryable);
+		mapped
+	}
+
+	#[test]
+	fn quota_exceeded_is_a_stable_round_trip_wire_error() {
+		let mapped = into_types_error(Error::QuotaExceeded(Box::new(QuotaExceededError {
+			database: "app".to_owned(),
+			generation: 1,
+			violations: vec![QuotaViolation {
+				rule: "records".to_owned(),
+				resource: "record".to_owned(),
+				table: "ent_user".to_owned(),
+				current: 2,
+				delta: 1,
+				projected: 3,
+				limit: 2,
+				over_by: 1,
+			}],
+			truncated: false,
+		})));
+		let ErrorDetails::Quota(quota) = mapped.details() else {
+			panic!("expected quota error details, got {:?}", mapped.details());
+		};
+		assert_eq!(quota.code(), "quota_exceeded");
+		assert!(!quota.retryable());
+		let Value::Object(details) = quota.details() else {
+			panic!("expected quota details object");
+		};
+		assert_eq!(details.get("database"), Some(&Value::String("app".to_owned())));
+		assert_eq!(details.get("generation"), Some(&Value::Number(1.into())));
+
+		let wire = mapped.clone().into_value();
+		let decoded = TypesError::from_value(wire).unwrap();
+		assert_eq!(decoded, mapped);
+	}
+
+	#[test]
+	fn quota_lifecycle_errors_have_stable_codes_and_retryability() {
+		assert_quota_error(
+			Error::QuotaAlreadyExists {
+				database: "app".to_owned(),
+			},
+			"quota_policy_exists",
+			false,
+		);
+		assert_quota_error(
+			Error::QuotaNotFound {
+				database: "app".to_owned(),
+			},
+			"quota_policy_not_found",
+			false,
+		);
+		assert_quota_error(
+			Error::QuotaGenerationMismatch {
+				database: "app".to_owned(),
+				expected: 1,
+				actual: 2,
+			},
+			"quota_generation_mismatch",
+			false,
+		);
+		assert_quota_error(
+			Error::QuotaRuleNotFound {
+				id: "records".to_owned(),
+			},
+			"quota_rule_not_found",
+			false,
+		);
+		assert_quota_error(
+			Error::QuotaPolicyInvalid {
+				reason: "bad selector".to_owned(),
+			},
+			"quota_policy_invalid",
+			false,
+		);
+		assert_quota_error(Error::QuotaConflict, "quota_conflict", true);
+		assert_quota_error(
+			Error::QuotaPolicyChanged {
+				database: "app".to_owned(),
+				expected: 1,
+				actual: 2,
+			},
+			"quota_policy_changed",
+			true,
+		);
+	}
+
+	#[test]
+	fn quota_ledger_retryability_depends_on_safe_state() {
+		let rebuilding = assert_quota_error(
+			Error::QuotaUsageNotReady {
+				state: "rebuilding".to_owned(),
+			},
+			"quota_ledger_unavailable",
+			true,
+		);
+		let corrupt = assert_quota_error(
+			Error::QuotaUsageInvalid {
+				reason: "secret internal key".to_owned(),
+			},
+			"quota_ledger_unavailable",
+			false,
+		);
+
+		assert_eq!(
+			rebuilding.quota_details().unwrap().details(),
+			&Value::Object(surrealdb_types::object! {
+				state: "rebuilding",
+			})
+		);
+		assert_eq!(
+			corrupt.quota_details().unwrap().details(),
+			&Value::Object(surrealdb_types::object! {
+				state: "corrupt",
+			})
+		);
 	}
 }

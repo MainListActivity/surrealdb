@@ -6,20 +6,21 @@ use std::sync::Arc;
 use anyhow::{Result, bail};
 
 use super::Transaction;
-use crate::catalog::providers::DatabaseProvider;
+use crate::catalog::providers::{DatabaseProvider, TableProvider};
 use crate::catalog::{
 	DatabaseId, NamespaceId, QuotaLimit, QuotaPolicyDefinition, QuotaResource, QuotaSelector,
 	QuotaUsageMeta, QuotaUsageState, TableDefinition,
 };
 use crate::err::{Error, QuotaExceededError, QuotaViolation};
 use crate::key::database::qg::Qg;
+use crate::key::database::ql::Ql;
 use crate::key::database::qm::Qm;
 use crate::key::database::qub::QuotaTableBucket;
 use crate::key::database::que::QuotaEpochRoot;
 use crate::key::database::quf::QuotaFieldUsage;
 use crate::key::database::qur::QuotaRecordUsage;
 use crate::kvs::{KVKey, KVValue, NORMAL_BATCH_SIZE};
-use crate::val::TableName;
+use crate::val::{Datetime, Object, TableName, Value};
 
 const MAX_QUOTA_VIOLATIONS: usize = 64;
 
@@ -44,6 +45,7 @@ struct QuotaTransactionSnapshot {
 pub(crate) struct QuotaTransactionState {
 	current: QuotaTransactionSnapshot,
 	savepoints: Vec<QuotaTransactionSnapshot>,
+	flushed_admission: bool,
 }
 
 impl QuotaTransactionState {
@@ -75,6 +77,15 @@ pub(crate) struct QuotaUsageSnapshot {
 	table_buckets: BTreeMap<(u64, String), u64>,
 	field_counts: BTreeMap<TableName, u64>,
 	record_counts: BTreeMap<TableName, u64>,
+}
+
+/// Counts and canonical counters produced by one trusted catalog/record scan.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub(crate) struct QuotaRebuildScan {
+	pub(crate) snapshot: QuotaUsageSnapshot,
+	pub(crate) tables: u64,
+	pub(crate) fields: u64,
+	pub(crate) records: u64,
 }
 
 impl QuotaUsageSnapshot {
@@ -331,17 +342,215 @@ impl Transaction {
 		}
 
 		if !violations.is_empty() {
+			let policy = snapshot
+				.databases
+				.values()
+				.find_map(|bound| bound.policy.as_deref())
+				.expect("quota violations require an active policy");
 			bail!(Error::QuotaExceeded(Box::new(QuotaExceededError {
+				database: policy.database.to_string(),
+				generation: policy.generation,
 				violations,
 				truncated: violations_truncated,
 			})));
 		}
 		quota_state.current = QuotaTransactionSnapshot::default();
+		quota_state.flushed_admission = true;
 		Ok(())
+	}
+
+	/// Whether this transaction staged quota admission fences or counters.
+	pub(crate) async fn has_flushed_quota_admission(&self) -> bool {
+		self.quota_state.lock().await.flushed_admission
+	}
+
+	/// Scan the complete database catalog and record keyspace into canonical
+	/// quota counters. The caller owns the surrounding consistent read
+	/// transaction and must run this only after committing the maintenance fence.
+	pub(crate) async fn scan_quota_usage(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+	) -> Result<QuotaRebuildScan> {
+		let policy = self.get_db_quota(ns, db, None).await?;
+		let tables = self.all_tb(ns, db, None).await?;
+		let mut scan = QuotaRebuildScan {
+			tables: u64::try_from(tables.len()).map_err(|_| Error::QuotaUsageInvalid {
+				reason: "table catalog size does not fit in quota rebuild count".to_owned(),
+			})?,
+			..QuotaRebuildScan::default()
+		};
+
+		if let Some(policy) = policy.as_deref() {
+			for rule in policy.rules.iter().filter(|rule| rule.resource == QuotaResource::Table) {
+				let count = tables
+					.iter()
+					.filter(|table| selector_matches(&rule.selector, &table.name))
+					.count();
+				let count = u64::try_from(count).map_err(|_| Error::QuotaUsageInvalid {
+					reason: "table quota bucket size does not fit in rebuild counter".to_owned(),
+				})?;
+				scan.snapshot.set_table_bucket_count(policy.generation, rule.id.as_str(), count);
+			}
+		}
+
+		for table in tables.iter() {
+			let fields = self.all_tb_fields(ns, db, &table.name, None).await?;
+			let field_count =
+				u64::try_from(fields.len()).map_err(|_| Error::QuotaUsageInvalid {
+					reason: format!(
+						"field catalog size for table '{}' does not fit in rebuild counter",
+						table.name
+					),
+				})?;
+			scan.fields =
+				scan.fields.checked_add(field_count).ok_or_else(|| Error::QuotaUsageInvalid {
+					reason: "quota rebuild field scan count overflow".to_owned(),
+				})?;
+			scan.snapshot.set_field_count(&table.name, field_count);
+
+			let beg = crate::key::record::prefix(ns, db, &table.name)?;
+			let end = crate::key::record::suffix(ns, db, &table.name)?;
+			let record_count = u64::try_from(self.count(beg..end, None).await?).map_err(|_| {
+				Error::QuotaUsageInvalid {
+					reason: format!(
+						"record count for table '{}' does not fit in rebuild counter",
+						table.name
+					),
+				}
+			})?;
+			scan.records =
+				scan.records.checked_add(record_count).ok_or_else(|| Error::QuotaUsageInvalid {
+					reason: "quota rebuild record scan count overflow".to_owned(),
+				})?;
+			scan.snapshot.set_record_count(&table.name, record_count);
+		}
+		Ok(scan)
 	}
 }
 
 impl QuotaTransaction<'_> {
+	/// Build the stable `INFO FOR QUOTA ... STRUCTURE` representation from one
+	/// transaction-consistent policy, ledger, catalog, and counter snapshot.
+	pub(crate) async fn info_structure(
+		&self,
+		database: &str,
+		policy: Option<&QuotaPolicyDefinition>,
+		tables: &[TableDefinition],
+	) -> Result<Value> {
+		let meta = self.meta().await?;
+		let usage_trusted = meta.state == QuotaUsageState::Ready;
+		let policy_value = policy.map_or(Value::None, quota_policy_value);
+		let usage = if usage_trusted {
+			self.info_usage(policy, tables).await?
+		} else {
+			Value::None
+		};
+		let latest_change =
+			self.tx.get(&Ql::new(self.ns, self.db), None).await?.map_or(Value::None, |change| {
+				Value::Object(Object::from(map! {
+					"action" => change.action.into(),
+					"actor" => change.actor.into(),
+					"changed_at" => Value::Datetime(change.changed_at),
+					"generation" => change.generation.into(),
+					"operation_id" => change.operation_id.into(),
+				}))
+			});
+		Ok(Value::Object(Object::from(map! {
+			"database" => database.into(),
+			"format_version" => 1u64.into(),
+			"latest_change" => latest_change,
+			"ledger" => Value::Object(Object::from(map! {
+				"active_epoch" => meta.active_epoch.map_or(Value::None, Value::from),
+				"state" => quota_usage_state_name(meta.state).into(),
+				"usage_trusted" => usage_trusted.into(),
+			})),
+			"observed_at" => Value::Datetime(Datetime::now()),
+			"policy" => policy_value,
+			"usage" => usage,
+		})))
+	}
+
+	/// Install every non-zero counter from a trusted scan into the currently
+	/// staged epoch.
+	pub(crate) async fn stage_rebuild_scan(&self, scan: &QuotaRebuildScan) -> Result<()> {
+		for ((generation, rule), count) in &scan.snapshot.table_buckets {
+			self.set_staged_table_bucket_count(*generation, rule, *count).await?;
+		}
+		for (table, count) in &scan.snapshot.field_counts {
+			self.set_staged_field_count(table, *count).await?;
+		}
+		for (table, count) in &scan.snapshot.record_counts {
+			self.set_staged_record_count(table, *count).await?;
+		}
+		Ok(())
+	}
+
+	async fn info_usage(
+		&self,
+		policy: Option<&QuotaPolicyDefinition>,
+		tables: &[TableDefinition],
+	) -> Result<Value> {
+		let mut tables = tables.iter().collect::<Vec<_>>();
+		tables.sort_by(|left, right| left.name.cmp(&right.name));
+
+		let mut table_buckets = Vec::new();
+		if let Some(policy) = policy {
+			for rule in policy.rules.iter().filter(|rule| rule.resource == QuotaResource::Table) {
+				let used = self.table_bucket_count(policy.generation, rule.id.as_str()).await?;
+				table_buckets.push(Value::Object(Object::from(map! {
+					"exceeded" => quota_exceeded(used, rule.limit).into(),
+					"limit" => quota_limit_value(rule.limit),
+					"remaining" => quota_remaining(used, rule.limit),
+					"rule_id" => rule.id.to_string().into(),
+					"used" => used.into(),
+				})));
+			}
+		}
+
+		let mut unmatched_table = Vec::new();
+		let mut unmatched_field = Vec::new();
+		let mut unmatched_record = Vec::new();
+		let mut table_usage = Vec::with_capacity(tables.len());
+		for table in tables {
+			let table_name = &table.name;
+			let table_matched = matching_rules(policy, QuotaResource::Table, table_name);
+			if table_matched.is_empty() {
+				unmatched_table.push(Value::from(table_name.to_string()));
+			}
+
+			let field_matched = matching_rules(policy, QuotaResource::Field, table_name);
+			if field_matched.is_empty() {
+				unmatched_field.push(Value::from(table_name.to_string()));
+			}
+			let field_used = self.field_count(table_name).await?;
+			let field = effective_usage_value(field_used, &field_matched);
+
+			let record_matched = matching_rules(policy, QuotaResource::Record, table_name);
+			if record_matched.is_empty() {
+				unmatched_record.push(Value::from(table_name.to_string()));
+			}
+			let record_used = self.record_count(table_name).await?;
+			let record = effective_usage_value(record_used, &record_matched);
+
+			table_usage.push(Value::Object(Object::from(map! {
+				"field" => field,
+				"record" => record,
+				"table" => table_name.to_string().into(),
+			})));
+		}
+
+		Ok(Value::Object(Object::from(map! {
+			"table_buckets" => table_buckets.into(),
+			"tables" => table_usage.into(),
+			"unmatched" => Value::Object(Object::from(map! {
+				"field" => unmatched_field.into(),
+				"record" => unmatched_record.into(),
+				"table" => unmatched_table.into(),
+			})),
+		})))
+	}
+
 	/// Materialise table-rule buckets for a newly installed policy generation.
 	///
 	/// Policy assignment may intentionally place a database over its new limit,
@@ -379,11 +588,10 @@ impl QuotaTransaction<'_> {
 		if let Some(policy) = &policy
 			&& Some(policy.generation) != observed_generation
 		{
-			bail!(Error::QuotaUsageInvalid {
-				reason: format!(
-					"quota policy generation {} does not match generation fence {:?}",
-					policy.generation, observed_generation
-				),
+			bail!(Error::QuotaPolicyChanged {
+				database: policy.database.to_string(),
+				expected: observed_generation.unwrap_or(0),
+				actual: policy.generation,
 			});
 		}
 		self.tx.quota_state.lock().await.current.databases.entry((self.ns, self.db)).or_insert(
@@ -504,11 +712,6 @@ impl QuotaTransaction<'_> {
 		let key = Qm::new(self.ns, self.db);
 		let current = self.stored_meta().await?;
 		let mut meta = current.clone().unwrap_or_else(QuotaUsageMeta::uninitialized);
-		if meta.state == QuotaUsageState::Rebuilding {
-			bail!(Error::QuotaUsageInvalid {
-				reason: "quota usage rebuild is already in progress".to_owned(),
-			});
-		}
 		let staged_epoch =
 			meta.epoch_high_water.checked_add(1).ok_or_else(|| Error::QuotaUsageInvalid {
 				reason: "quota usage epoch overflow".to_owned(),
@@ -893,6 +1096,140 @@ impl QuotaTransaction<'_> {
 	}
 }
 
+fn quota_usage_state_name(state: QuotaUsageState) -> &'static str {
+	match state {
+		QuotaUsageState::Uninitialized => "uninitialized",
+		QuotaUsageState::Rebuilding => "rebuilding",
+		QuotaUsageState::Ready => "ready",
+		QuotaUsageState::Corrupt => "corrupt",
+	}
+}
+
+/// Lightweight database INFO discovery summary. It intentionally omits rules
+/// and usage so broad schema discovery does not become a high-cardinality scan.
+pub(crate) fn quota_summary_value(
+	policy: Option<&QuotaPolicyDefinition>,
+	generation: Option<u64>,
+) -> Value {
+	Value::Object(Object::from(map! {
+		"defined" => policy.is_some().into(),
+		"generation" => generation.map_or(Value::None, Value::from),
+	}))
+}
+
+fn quota_policy_value(policy: &QuotaPolicyDefinition) -> Value {
+	let rules = policy.rules.iter().map(quota_rule_value).collect::<Vec<_>>();
+	Value::Object(Object::from(map! {
+		"generation" => policy.generation.into(),
+		"rules" => rules.into(),
+	}))
+}
+
+fn quota_rule_value(rule: &crate::catalog::QuotaRuleDefinition) -> Value {
+	let resource = match rule.resource {
+		QuotaResource::Table => "table",
+		QuotaResource::Field => "field",
+		QuotaResource::Record => "record",
+	};
+	let selector = match &rule.selector {
+		QuotaSelector::Exact(table) => Value::Object(Object::from(map! {
+			"kind" => "exact".into(),
+			"table" => table.to_string().into(),
+		})),
+		QuotaSelector::Regex(regex) => Value::Object(Object::from(map! {
+			"kind" => "regex".into(),
+			"pattern" => regex.inner().as_str().into(),
+		})),
+	};
+	Value::Object(Object::from(map! {
+		"limit" => quota_limit_value(rule.limit),
+		"resource" => resource.into(),
+		"rule_id" => rule.id.to_string().into(),
+		"selector" => selector,
+	}))
+}
+
+fn quota_limit_value(limit: QuotaLimit) -> Value {
+	match limit {
+		QuotaLimit::Finite(value) => Value::Object(Object::from(map! {
+			"kind" => "finite".into(),
+			"value" => value.into(),
+		})),
+		QuotaLimit::Unlimited => Value::Object(Object::from(map! {
+			"kind" => "unlimited".into(),
+		})),
+	}
+}
+
+fn quota_remaining(used: u64, limit: QuotaLimit) -> Value {
+	match limit {
+		QuotaLimit::Finite(limit) => limit.saturating_sub(used).into(),
+		QuotaLimit::Unlimited => Value::None,
+	}
+}
+
+fn quota_exceeded(used: u64, limit: QuotaLimit) -> bool {
+	matches!(limit, QuotaLimit::Finite(limit) if used > limit)
+}
+
+fn matching_rules<'a>(
+	policy: Option<&'a QuotaPolicyDefinition>,
+	resource: QuotaResource,
+	table: &TableName,
+) -> Vec<&'a crate::catalog::QuotaRuleDefinition> {
+	policy
+		.into_iter()
+		.flat_map(|policy| policy.rules.iter())
+		.filter(|rule| rule.resource == resource && selector_matches(&rule.selector, table))
+		.collect()
+}
+
+fn effective_usage_value(used: u64, matched: &[&crate::catalog::QuotaRuleDefinition]) -> Value {
+	let matched_rule_ids =
+		matched.iter().map(|rule| Value::from(rule.id.to_string())).collect::<Vec<_>>();
+	let exact =
+		matched.iter().copied().find(|rule| matches!(rule.selector, QuotaSelector::Exact(_)));
+	let (effective, limit, limit_origin) = if let Some(exact) = exact {
+		let origin = if exact.limit == QuotaLimit::Unlimited {
+			"explicit_unlimited"
+		} else {
+			"exact"
+		};
+		(vec![exact], exact.limit, origin)
+	} else {
+		let minimum = matched.iter().filter_map(|rule| match rule.limit {
+			QuotaLimit::Finite(limit) => Some(limit),
+			QuotaLimit::Unlimited => None,
+		});
+		if let Some(minimum) = minimum.min() {
+			(
+				matched
+					.iter()
+					.copied()
+					.filter(|rule| rule.limit == QuotaLimit::Finite(minimum))
+					.collect(),
+				QuotaLimit::Finite(minimum),
+				"regex_min",
+			)
+		} else if matched.is_empty() {
+			(Vec::new(), QuotaLimit::Unlimited, "unmatched")
+		} else {
+			(matched.to_owned(), QuotaLimit::Unlimited, "explicit_unlimited")
+		}
+	};
+	let effective_rule_ids =
+		effective.iter().map(|rule| Value::from(rule.id.to_string())).collect::<Vec<_>>();
+	Value::Object(Object::from(map! {
+		"effective_rule_ids" => effective_rule_ids.into(),
+		"exceeded" => quota_exceeded(used, limit).into(),
+		"limit" => quota_limit_value(limit),
+		"limit_origin" => limit_origin.into(),
+		"matched_rule_ids" => matched_rule_ids.into(),
+		"remaining" => quota_remaining(used, limit),
+		"used" => used.into(),
+	}))
+}
+
 fn selector_matches(selector: &QuotaSelector, table: &TableName) -> bool {
 	match selector {
 		QuotaSelector::Exact(exact) => exact.as_str() == table.as_str(),
@@ -1018,9 +1355,22 @@ fn push_violation(
 	let Some(violation) = violation else {
 		return;
 	};
-	if violations.len() < MAX_QUOTA_VIOLATIONS {
-		violations.push(violation);
-	} else {
+	violations.push(violation);
+	violations.sort_unstable_by(|left, right| {
+		let rank = |resource: &str| match resource {
+			"table" => 0,
+			"field" => 1,
+			"record" => 2,
+			_ => 3,
+		};
+		(rank(&left.resource), &left.table, &left.rule).cmp(&(
+			rank(&right.resource),
+			&right.table,
+			&right.rule,
+		))
+	});
+	if violations.len() > MAX_QUOTA_VIOLATIONS {
+		violations.pop();
 		*truncated = true;
 	}
 }

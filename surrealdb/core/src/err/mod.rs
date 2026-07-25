@@ -49,6 +49,8 @@ pub(crate) struct QuotaViolation {
 /// every error value and the deeply nested async futures which carry it.
 #[derive(Debug)]
 pub(crate) struct QuotaExceededError {
+	pub database: String,
+	pub generation: u64,
 	pub violations: Vec<QuotaViolation>,
 	pub truncated: bool,
 }
@@ -1036,6 +1038,20 @@ pub(crate) enum Error {
 	#[error("Database quota usage is not writable while its ledger is {state}")]
 	QuotaUsageNotReady {
 		state: String,
+	},
+
+	/// A quota-protected transaction lost a conditional storage race
+	#[error("Quota admission conflicted with another transaction")]
+	QuotaConflict,
+
+	/// The quota policy changed after a protected transaction observed it
+	#[error(
+		"The quota policy for database '{database}' changed from generation {expected} to {actual}"
+	)]
+	QuotaPolicyChanged {
+		database: String,
+		expected: u64,
+		actual: u64,
 	},
 
 	/// A protected resource would exceed its configured quota

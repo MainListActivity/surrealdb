@@ -86,6 +86,7 @@ mod tests {
 		const FORBIDDEN_PREFIXES: &[&str] = &[
 			"surrealdb_queries_",
 			"surrealdb_query_",
+			"surrealdb_quota_",
 			"surrealdb_statements_",
 			"surrealdb_statement_",
 			"surrealdb_rpcs_",

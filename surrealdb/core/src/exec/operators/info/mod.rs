@@ -13,6 +13,7 @@
 mod database;
 mod index;
 mod namespace;
+mod quota;
 mod root;
 mod table;
 mod user;
@@ -20,6 +21,7 @@ mod user;
 pub use database::DatabaseInfoPlan;
 pub use index::IndexInfoPlan;
 pub use namespace::NamespaceInfoPlan;
+pub use quota::QuotaInfoPlan;
 pub use root::RootInfoPlan;
 pub use table::TableInfoPlan;
 pub use user::UserInfoPlan;

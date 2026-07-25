@@ -37,10 +37,10 @@ use crate::sql::statements::sleep::SleepStatement;
 use crate::sql::statements::{
 	AccessStatement, CreateStatement, DeleteStatement, ForeachStatement, IfelseStatement,
 	InfoStatement, InsertStatement, KillStatement, OptionStatement, OutputStatement,
-	RelateStatement, RemoveAccessStatement, RemoveDatabaseStatement, RemoveEventStatement,
-	RemoveFieldStatement, RemoveFunctionStatement, RemoveIndexStatement, RemoveNamespaceStatement,
-	RemoveParamStatement, RemoveStatement, RemoveTableStatement, RemoveUserStatement,
-	SelectStatement, UpdateStatement, UpsertStatement, UseStatement,
+	RebuildStatement, RelateStatement, RemoveAccessStatement, RemoveDatabaseStatement,
+	RemoveEventStatement, RemoveFieldStatement, RemoveFunctionStatement, RemoveIndexStatement,
+	RemoveNamespaceStatement, RemoveParamStatement, RemoveStatement, RemoveTableStatement,
+	RemoveUserStatement, SelectStatement, UpdateStatement, UpsertStatement, UseStatement,
 };
 use crate::sql::tokenizer::Tokenizer;
 use crate::sql::{
@@ -2201,6 +2201,25 @@ fn parse_info() {
 		Expr::Info(Box::new(InfoStatement::Tb(Expr::Table("table".into()), false, None)))
 	);
 
+	for (sql, structured) in [
+		("INFO FOR QUOTA ON DATABASE app", false),
+		("INFO FOR QUOTA ON DATABASE app STRUCTURE", true),
+	] {
+		let res = syn::parse_with(sql.as_bytes(), async |parser, stk| {
+			parser.parse_expr_inherit(stk).await
+		})
+		.unwrap();
+		let Expr::Info(info) = res else {
+			panic!("expected INFO statement");
+		};
+		assert_eq!(info.to_sql(), sql);
+		assert!(matches!(
+			info.as_ref(),
+			InfoStatement::Quota(Expr::Table(database), actual_structured)
+				if database.as_str() == "app" && *actual_structured == structured
+		));
+	}
+
 	let res = syn::parse_with("INFO FOR USER user".as_bytes(), async |parser, stk| {
 		parser.parse_expr_inherit(stk).await
 	})
@@ -2226,6 +2245,29 @@ fn parse_info() {
 			false
 		)))
 	);
+}
+
+#[test]
+fn parse_rebuild_quota() {
+	for (sql, if_needed) in [
+		("REBUILD QUOTA ON DATABASE app", false),
+		("REBUILD QUOTA IF NEEDED ON DATABASE app", true),
+	] {
+		let res = syn::parse_with(sql.as_bytes(), async |parser, stk| {
+			parser.parse_expr_inherit(stk).await
+		})
+		.unwrap();
+		let Expr::Rebuild(statement) = res else {
+			panic!("expected REBUILD statement");
+		};
+		assert_eq!(statement.to_sql(), sql);
+		assert!(matches!(
+			statement.as_ref(),
+			RebuildStatement::Quota(statement)
+				if statement.if_needed && if_needed
+					|| !statement.if_needed && !if_needed
+		));
+	}
 }
 
 #[test]

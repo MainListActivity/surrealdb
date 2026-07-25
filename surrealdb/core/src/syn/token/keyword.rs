@@ -143,6 +143,7 @@ keyword! {
 	Model => "MODEL",
 	Module => "MODULE",
 	Namespace => "NAMESPACE",
+	Needed => "NEEDED",
 	Ngram => "NGRAM",
 	No => "NO",
 	NoIndex => "NOINDEX",

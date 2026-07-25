@@ -371,6 +371,14 @@ pub(crate) fn expr_required_context(expr: &Expr) -> ContextLevel {
 		{
 			ContextLevel::Namespace
 		}
+		Expr::Rebuild(statement)
+			if matches!(
+				statement.as_ref(),
+				crate::expr::statements::rebuild::RebuildStatement::Quota(_)
+			) =>
+		{
+			ContextLevel::Namespace
+		}
 		Expr::Define(_) | Expr::Remove(_) | Expr::Alter(_) | Expr::Rebuild(_) => {
 			ContextLevel::Database
 		}
@@ -410,6 +418,9 @@ fn info_stmt_required_context(info: &InfoStatement) -> ContextLevel {
 		InfoStatement::Ns(_, _) => ContextLevel::Namespace,
 		InfoStatement::Db(_, _) | InfoStatement::Tb(_, _, _) | InfoStatement::Index(_, _, _) => {
 			ContextLevel::Database
+		}
+		InfoStatement::Quota(database, _) => {
+			ContextLevel::Namespace.max(expr_required_context(database))
 		}
 		InfoStatement::User(user_expr, base, _) => {
 			let base_ctx = match base {

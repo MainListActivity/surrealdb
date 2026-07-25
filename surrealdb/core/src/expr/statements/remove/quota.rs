@@ -7,10 +7,13 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::parameterize::expr_to_ident;
+use crate::expr::statements::quota::QuotaOperation;
 use crate::expr::{Base, Expr, Value};
 use crate::iam::{Action, ResourceKind};
 use crate::key::database::qg::Qg;
+use crate::key::database::ql::Ql;
 use crate::key::database::qt::Qt;
+use crate::observe::{QuotaEventKind, QuotaEventOutcome};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct RemoveQuotaStatement {
@@ -41,13 +44,15 @@ impl RemoveQuotaStatement {
 				name: database.clone(),
 			}
 		})?;
+		let operation = QuotaOperation::new("remove", database.clone());
 		txn.flush_quota_usage().await?;
-		txn.quota_usage(db.namespace_id, db.database_id).ensure_writable_for_update().await?;
+		let meta =
+			txn.quota_usage(db.namespace_id, db.database_id).ensure_writable_for_update().await?;
 		let generation_key = Qg::new(db.namespace_id, db.database_id);
 		let stored_generation = txn.get(&generation_key, None).await?;
 		let Some(current) = txn.get_db_quota(db.namespace_id, db.database_id, None).await? else {
 			if self.if_exists {
-				return Ok(Value::None);
+				return Ok(operation.result(false, stored_generation, stored_generation, &meta));
 			}
 			bail!(Error::QuotaNotFound {
 				database,
@@ -66,7 +71,16 @@ impl RemoveQuotaStatement {
 			})?;
 		txn.putc(&generation_key, &tombstone_generation, stored_generation.as_ref()).await?;
 		txn.delc(&Qt::new(db.namespace_id, db.database_id), Some(current.as_ref())).await?;
+		let change = operation.latest_change(opt.auth.id().to_string(), tombstone_generation);
+		txn.set(&Ql::new(db.namespace_id, db.database_id), &change).await?;
+		txn.queue_quota_event(operation.audit_event(
+			QuotaEventKind::Remove,
+			namespace,
+			opt.auth.id().to_string(),
+			QuotaEventOutcome::Changed,
+		))
+		.await;
 		txn.clear_cache();
-		Ok(Value::None)
+		Ok(operation.result(true, Some(current.generation), Some(tombstone_generation), &meta))
 	}
 }

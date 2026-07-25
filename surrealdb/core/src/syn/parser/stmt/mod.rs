@@ -455,6 +455,13 @@ impl Parser<'_> {
 				let structure = self.eat(t!("STRUCTURE"));
 				InfoStatement::Tb(ident, structure, version)
 			}
+			t!("QUOTA") => {
+				expected!(self, t!("ON"));
+				expected!(self, t!("DATABASE"));
+				let database = stk.run(|stk| self.parse_expr_table(stk)).await?;
+				let structure = self.eat(t!("STRUCTURE"));
+				InfoStatement::Quota(database, structure)
+			}
 			t!("USER") => {
 				let ident = stk.run(|stk| self.parse_expr_inherit(stk)).await?;
 				let base = self.eat(t!("ON")).then(|| self.parse_base()).transpose()?;
@@ -562,6 +569,21 @@ impl Parser<'_> {
 					name,
 					if_exists,
 					concurrently,
+				})
+			}
+			t!("QUOTA") => {
+				let if_needed = if self.eat(t!("IF")) {
+					expected!(self, t!("NEEDED"));
+					true
+				} else {
+					false
+				};
+				expected!(self, t!("ON"));
+				expected!(self, t!("DATABASE"));
+				let database = crate::sql::Expr::Table(self.parse_ident_str()?.into());
+				RebuildStatement::Quota(crate::sql::statements::rebuild::RebuildQuotaStatement {
+					database,
+					if_needed,
 				})
 			}
 			_ => unexpected!(self, next, "a rebuild statement keyword"),

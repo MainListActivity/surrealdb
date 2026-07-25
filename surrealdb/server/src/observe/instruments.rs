@@ -39,6 +39,8 @@ pub mod scope {
 	pub static STATEMENT: &str = "surrealdb.statement";
 	/// Executor query batch events.
 	pub static QUERY: &str = "surrealdb.query";
+	/// Native resource-quota decisions and control-plane operations.
+	pub static QUOTA: &str = "surrealdb.quota";
 	/// Transaction lifecycle and KV counters.
 	pub static TRANSACTION: &str = "surrealdb.transaction";
 	/// RPC method invocations (WebSocket and HTTP-RPC).
@@ -83,6 +85,7 @@ pub mod scope {
 		NETWORK,
 		PROCESS,
 		QUERY,
+		QUOTA,
 		RPC,
 		SESSION,
 		SLOW_QUERY,
@@ -119,6 +122,11 @@ pub mod names {
 
 	pub static QUERY_TOTAL: &str = "surrealdb.query";
 	pub static QUERY_DURATION: &str = "surrealdb.query.duration";
+
+	// --- Native quota (scope: QUOTA) ----------------------------------
+
+	pub static QUOTA_OPERATION_TOTAL: &str = "surrealdb.quota.operation";
+	pub static QUOTA_REBUILD_DURATION: &str = "surrealdb.quota.rebuild.duration";
 
 	// --- Transaction (scope: TRANSACTION) ------------------------------
 
@@ -237,6 +245,8 @@ pub mod attrs {
 	/// Bounded error classification recorded only when `outcome="error"`. Sourced
 	/// from [`error_class`] constants so cardinality stays closed.
 	pub static ERROR_CLASS: &str = "error_class";
+	/// Native-quota operation (`admission`, `define`, `alter`, `remove`, or `rebuild`).
+	pub static QUOTA_OPERATION: &str = "quota_operation";
 	/// GraphQL operation type (`query` / `mutation` / `subscription`).
 	pub static GRAPHQL_OPERATION_TYPE: &str = "operation_type";
 	/// MCP tool name (bounded — sourced from the static tool dispatch in the mcp crate).
@@ -291,6 +301,8 @@ mod tests {
 			names::PROCESS_UPTIME,
 			names::QUERY_DURATION,
 			names::QUERY_TOTAL,
+			names::QUOTA_OPERATION_TOTAL,
+			names::QUOTA_REBUILD_DURATION,
 			names::RPC_DURATION,
 			names::RPC_TOTAL,
 			names::SESSION_ACTIVE,
