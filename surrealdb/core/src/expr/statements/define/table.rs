@@ -28,7 +28,6 @@ use crate::expr::{
 	Groups, Idiom, Kind, Literal, SelectStatement, View,
 };
 use crate::iam::{Action, ResourceKind};
-use crate::key;
 use crate::kvs::Transaction;
 use crate::val::{Array, Number, RecordId, RecordIdKey, TableName, Value};
 
@@ -341,9 +340,8 @@ impl DefineTableStatement {
 				fail!("select results did not contain a record id");
 			};
 
-			let key = key::record::new(ns, db, view_table_name, &id.key);
 			let record = Arc::new(Record::new(Value::Object(o)));
-			tx.put(&key, &record).await?;
+			tx.put_record(ns, db, view_table_name, &id.key, Arc::clone(&record)).await?;
 
 			let ns = doc_ctx.ns();
 			let db = doc_ctx.db();

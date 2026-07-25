@@ -28,6 +28,8 @@ mod multiwriter_different_keys;
 mod multiwriter_same_keys_allow;
 mod multiwriter_same_keys_conflict;
 #[cfg(feature = "kv-mem")]
+mod quota_record_test;
+#[cfg(feature = "kv-mem")]
 mod quota_table_field_test;
 #[cfg(feature = "kv-mem")]
 mod quota_test;

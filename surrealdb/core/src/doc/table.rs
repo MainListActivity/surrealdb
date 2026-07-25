@@ -445,7 +445,7 @@ impl Document {
 
 		if count == 1 {
 			// Only one record, we can just delete the record.
-			tx.del(&k).await?;
+			tx.del_record(db.namespace_id, db.database_id, view_table_name, &key).await?;
 
 			let ns = self.doc_ctx.ns();
 			let db = self.doc_ctx.db();

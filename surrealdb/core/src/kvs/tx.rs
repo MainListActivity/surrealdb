@@ -4037,6 +4037,7 @@ impl TableProvider for Transaction {
 			async move {
 				let key = crate::key::record::new(ns, db, tb, id);
 				self.put(&key, record.as_ref()).await?;
+				self.quota_usage(ns, db).register_record_delta(tb, 1).await?;
 				// Set the value in the cache
 				let qey = cache::tx::Lookup::Record(ns, db, tb, id);
 				self.cache.insert(qey, cache::tx::Entry::Val(record));
@@ -4059,7 +4060,11 @@ impl TableProvider for Transaction {
 			async move {
 				// Set the value in the datastore
 				let key = crate::key::record::new(ns, db, tb, id);
+				let existed = self.exists(&key, None).await?;
 				self.set(&key, record.as_ref()).await?;
+				if !existed {
+					self.quota_usage(ns, db).register_record_delta(tb, 1).await?;
+				}
 				// Clear the value from the cache
 				let qey = cache::tx::Lookup::Record(ns, db, tb, id);
 				self.cache.remove(&qey);
@@ -4081,7 +4086,11 @@ impl TableProvider for Transaction {
 			async move {
 				// Delete the value in the datastore
 				let key = crate::key::record::new(ns, db, tb, id);
+				let existed = self.exists(&key, None).await?;
 				self.del(&key).await?;
+				if existed {
+					self.quota_usage(ns, db).register_record_delta(tb, -1).await?;
+				}
 				// Clear the value from the cache
 				let qey = cache::tx::Lookup::Record(ns, db, tb, id);
 				self.cache.remove(&qey);

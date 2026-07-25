@@ -30,12 +30,9 @@ use crate::val::{CastError, CoerceError, Duration, RecordId, TableName, Value};
 mod to_types;
 pub(crate) use to_types::into_types_error;
 
-/// Detailed, boxed payload for a quota admission failure.
-///
-/// Keeping this out of the inline [`Error`] representation avoids inflating
-/// every error value and the deeply nested async futures which carry it.
+/// One deterministic quota admission violation.
 #[derive(Debug)]
-pub(crate) struct QuotaExceededError {
+pub(crate) struct QuotaViolation {
 	pub rule: String,
 	pub resource: String,
 	pub table: String,
@@ -43,22 +40,41 @@ pub(crate) struct QuotaExceededError {
 	pub delta: i128,
 	pub projected: u64,
 	pub limit: u64,
+	pub over_by: u64,
+}
+
+/// Detailed, boxed payload for an aggregated quota admission failure.
+///
+/// Keeping this out of the inline [`Error`] representation avoids inflating
+/// every error value and the deeply nested async futures which carry it.
+#[derive(Debug)]
+pub(crate) struct QuotaExceededError {
+	pub violations: Vec<QuotaViolation>,
+	pub truncated: bool,
 }
 
 impl Display for QuotaExceededError {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		write!(
-			f,
-			"Quota rule '{}' for {} on table '{}' would be exceeded: current {}, delta {}, \
-			 projected {}, limit {}",
-			self.rule,
-			self.resource,
-			self.table,
-			self.current,
-			self.delta,
-			self.projected,
-			self.limit
-		)
+		write!(f, "Quota exceeded with {} violation(s)", self.violations.len())?;
+		for violation in &self.violations {
+			write!(
+				f,
+				"; rule '{}' for {} on table '{}': current {}, delta {}, projected {}, limit {}, \
+				 over by {}",
+				violation.rule,
+				violation.resource,
+				violation.table,
+				violation.current,
+				violation.delta,
+				violation.projected,
+				violation.limit,
+				violation.over_by
+			)?;
+		}
+		if self.truncated {
+			f.write_str("; additional violations truncated")?;
+		}
+		Ok(())
 	}
 }
 
