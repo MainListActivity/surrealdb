@@ -19,6 +19,7 @@
 //! - {db_name}: &str
 //!
 //! crate::key::version                  !v -> Version
+//! crate::key::format                   !vf -> ForkStorageFormat
 //!
 //! crate::key::root::all                /
 //! crate::key::root::ac                 /!ac{ac}
@@ -110,6 +111,7 @@ pub(crate) mod category;
 pub(crate) mod change;
 pub(crate) mod database;
 pub(crate) mod debug;
+pub(crate) mod format;
 pub(crate) mod graph;
 pub(crate) mod index;
 pub(crate) mod lqe;

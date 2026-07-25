@@ -29,10 +29,14 @@ mod multiwriter_same_keys_allow;
 mod multiwriter_same_keys_conflict;
 #[cfg(feature = "kv-mem")]
 mod quota_test;
+#[cfg(feature = "kv-mem")]
+mod quota_usage_test;
 mod raw;
 #[cfg(feature = "kv-mem")]
 mod reclaim_test;
 mod snapshot;
+#[cfg(feature = "kv-mem")]
+mod storage_format_test;
 #[cfg(feature = "kv-mem")]
 mod tx_cache_test;
 

@@ -2535,7 +2535,17 @@ impl DatabaseProvider for Transaction {
 	) -> BoxProviderFut<'a, Result<Arc<DatabaseDefinition>>> {
 		Box::pin(async move {
 			let key = crate::key::namespace::db::new(db.namespace_id, &db.name);
+			let existing = self.get(&key, None).await?;
+			if let Some(existing) = &existing {
+				self.quota_usage(existing.namespace_id, existing.database_id)
+					.ensure_writable_for_update()
+					.await?;
+			}
+			let is_new = existing.is_none();
 			self.set(&key, &db).await?;
+			if is_new {
+				self.quota_usage(db.namespace_id, db.database_id).initialize_new_database().await?;
+			}
 
 			// Invalidate the cached list of all databases for this namespace
 			let list_key = cache::tx::Lookup::Dbs(db.namespace_id);

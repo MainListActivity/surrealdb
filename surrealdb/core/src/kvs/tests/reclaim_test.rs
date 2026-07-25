@@ -70,6 +70,17 @@ async fn remove_database_defers_data_reclaim() {
 	)
 	.await
 	.unwrap();
+	ds.execute(
+		"DEFINE QUOTA ON DATABASE tenant \
+		 RULE records FOR RECORD MATCH EXACT thing LIMIT 10",
+		&Session::owner().with_ns("test"),
+		None,
+	)
+	.await
+	.unwrap()
+	.remove(0)
+	.result
+	.unwrap();
 
 	// Resolve the internal ids and confirm data exists under the db prefix.
 	let (ns_id, db_id) = {
@@ -78,6 +89,14 @@ async fn remove_database_defers_data_reclaim() {
 		let _ = tx.cancel().await;
 		(db.namespace_id, db.database_id)
 	};
+	{
+		let tx = ds.transaction(Write, Optimistic).await.unwrap();
+		tx.quota_usage(ns_id, db_id)
+			.increment_record_count(&crate::val::TableName::from("thing"), 2)
+			.await
+			.unwrap();
+		tx.commit().await.unwrap();
+	}
 	let db_prefix = crate::key::database::all::new(ns_id, db_id);
 	let range = crate::kvs::util::to_prefix_range(&db_prefix).unwrap();
 	assert!(
@@ -122,24 +141,27 @@ async fn remove_database_defers_data_reclaim() {
 	);
 	assert_eq!(reclaim_queue_len(&ds).await, 0, "the reclaim task must drain the reclaim queue");
 
-	// Recreating the same name yields a fresh, empty database with a new id.
+	// Recreating the same name yields a fresh database with a new id.
 	ds.execute("DEFINE DATABASE tenant;", &ses, None).await.unwrap();
-	let new_db_id = {
+	let (new_db_id, new_usage_meta) = {
 		let tx = ds.transaction(Read, Optimistic).await.unwrap();
 		let db = tx.get_db_by_name("test", "tenant", None).await.unwrap().unwrap();
+		let meta = tx.quota_usage(db.namespace_id, db.database_id).meta().await.unwrap();
 		let _ = tx.cancel().await;
-		db.database_id
+		(db.database_id, meta)
 	};
 	assert_ne!(new_db_id, db_id, "recreated database must get a fresh, never-reused id");
+	assert_eq!(new_usage_meta, crate::catalog::QuotaUsageMeta::ready_empty());
 
-	// The recreated database starts physically empty — none of the removed
-	// database's data is reachable under the new (disjoint) prefix.
+	// The recreated database contains only its protected empty-ledger metadata;
+	// none of the removed database's policy, counters, or business data leaks
+	// into the new (disjoint) prefix.
 	let new_prefix = crate::key::database::all::new(ns_id, new_db_id);
 	let new_range = crate::kvs::util::to_prefix_range(&new_prefix).unwrap();
 	assert_eq!(
 		count_range(&ds, new_range.start, new_range.end).await,
-		0,
-		"recreated database must start empty with no data leaked from the removed one"
+		1,
+		"recreated database must contain only its empty quota ledger metadata"
 	);
 }
 

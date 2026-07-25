@@ -51,6 +51,20 @@ pub fn is_query_timedout(error: &anyhow::Error) -> bool {
 	matches!(error.downcast_ref::<Error>(), Some(Error::QueryTimedout(_)))
 }
 
+/// Returns true when startup must fail immediately because storage needs an
+/// explicit migration or a different binary.
+pub fn is_storage_compatibility_error(error: &anyhow::Error) -> bool {
+	matches!(
+		error.downcast_ref::<Error>(),
+		Some(
+			Error::InvalidStorageVersion
+				| Error::OutdatedStorageVersion { .. }
+				| Error::ForkStorageMigrationRequired { .. }
+				| Error::ForkStorageFormatIncompatible { .. }
+		)
+	)
+}
+
 /// An error originating from an embedded SurrealDB database.
 #[derive(Error, Debug)]
 #[allow(clippy::enum_variant_names)]
@@ -964,6 +978,18 @@ pub(crate) enum Error {
 	#[error("Quota policy statements are not allowed during database import")]
 	QuotaImportNotAllowed,
 
+	/// Quota usage metadata or counters are internally inconsistent
+	#[error("Invalid quota usage ledger: {reason}")]
+	QuotaUsageInvalid {
+		reason: String,
+	},
+
+	/// A database is fenced for quota usage maintenance
+	#[error("Database quota usage is not writable while its ledger is {state}")]
+	QuotaUsageNotReady {
+		state: String,
+	},
+
 	/// The requested table already exists
 	#[error("The table '{name}' already exists")]
 	TbAlreadyExists {
@@ -1174,6 +1200,20 @@ pub(crate) enum Error {
 	OutdatedStorageVersion {
 		expected: u16,
 		actual: u16,
+	},
+
+	/// An upstream datastore must pass through the explicit native-quota migrator
+	#[error(
+		"Datastore storage version {actual} requires explicit migration to the native-quota fork format"
+	)]
+	ForkStorageMigrationRequired {
+		actual: u16,
+	},
+
+	/// The fork-required storage marker is missing or incompatible
+	#[error("Native-quota fork storage format is incompatible: {reason}")]
+	ForkStorageFormatIncompatible {
+		reason: String,
 	},
 
 	#[error("Size of query script exceeded maximum supported size of 4,294,967,295 bytes.")]

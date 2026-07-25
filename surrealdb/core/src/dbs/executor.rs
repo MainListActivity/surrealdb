@@ -652,6 +652,28 @@ impl Executor {
 					.map_err(anyhow::Error::new)?
 			};
 		}
+		// A quota rebuild is a database maintenance operation. Normal writes
+		// against the selected database stay fenced until a validated staged
+		// epoch is atomically activated. Keep the bypass deliberately narrow:
+		// definition expressions can execute nested writes, so DDL is checked
+		// like every other mutation.
+		let bypass_quota_fence = match &plan {
+			TopLevelExpr::Use(UseStatement::Default) => true,
+			TopLevelExpr::Use(UseStatement::Ns(target))
+			| TopLevelExpr::Use(UseStatement::Db(target)) => target.read_only(),
+			TopLevelExpr::Use(UseStatement::NsDb(namespace, database)) => {
+				namespace.read_only() && database.read_only()
+			}
+			TopLevelExpr::Show(_) | TopLevelExpr::Kill(_) => true,
+			_ => false,
+		};
+		if !plan.read_only()
+			&& !bypass_quota_fence
+			&& let (Some(ns), Some(db)) = (self.opt.ns.as_deref(), self.opt.db.as_deref())
+			&& let Some(db) = txn.get_db_by_name(ns, db, None).await?
+		{
+			txn.quota_usage(db.namespace_id, db.database_id).ensure_writable().await?;
+		}
 		let res = match plan {
 			TopLevelExpr::Use(stmt) => {
 				let opt_ref = self.opt.clone();

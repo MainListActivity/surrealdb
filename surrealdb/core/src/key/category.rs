@@ -11,6 +11,8 @@ pub(crate) trait Categorise {
 pub enum Category {
 	/// crate::key::storage::version         /sv
 	Version,
+	/// crate::key::format                   !vf
+	ForkStorageFormat,
 	/// crate::key::root::all                /
 	Root,
 	/// crate::key::root::access::ac         /!ac{ac}
@@ -115,6 +117,16 @@ pub enum Category {
 	DatabaseQuota,
 	/// crate::key::database::qg             /*{ns}*{db}!qg
 	DatabaseQuotaGeneration,
+	/// crate::key::database::qm             /*{ns}*{db}!qm
+	DatabaseQuotaUsageMeta,
+	/// crate::key::database::qub            /*{ns}*{db}!qu{epoch}!tb{generation}{rule}
+	DatabaseQuotaTableBucket,
+	/// crate::key::database::quf            /*{ns}*{db}!qu{epoch}!fd{table}
+	DatabaseQuotaFieldUsage,
+	/// crate::key::database::qur            /*{ns}*{db}!qu{epoch}!rc{table}
+	DatabaseQuotaRecordUsage,
+	/// crate::key::database::que            /*{ns}*{db}!qu{epoch}
+	DatabaseQuotaEpochRoot,
 	///
 	/// ------------------------------
 	///
@@ -226,6 +238,7 @@ impl Display for Category {
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
 		let name = match self {
 			Self::Version => "StorageVersion",
+			Self::ForkStorageFormat => "ForkStorageFormat",
 			Self::Root => "Root",
 			Self::Access => "Access",
 			Self::AccessRoot => "AccessRoot",
@@ -264,6 +277,11 @@ impl Display for Category {
 			Self::DatabaseSequence => "DatabaseSequence",
 			Self::DatabaseQuota => "DatabaseQuota",
 			Self::DatabaseQuotaGeneration => "DatabaseQuotaGeneration",
+			Self::DatabaseQuotaUsageMeta => "DatabaseQuotaUsageMeta",
+			Self::DatabaseQuotaTableBucket => "DatabaseQuotaTableBucket",
+			Self::DatabaseQuotaFieldUsage => "DatabaseQuotaFieldUsage",
+			Self::DatabaseQuotaRecordUsage => "DatabaseQuotaRecordUsage",
+			Self::DatabaseQuotaEpochRoot => "DatabaseQuotaEpochRoot",
 			Self::DatabaseConfig => "DatabaseConfig",
 			Self::TableRoot => "TableRoot",
 			Self::TableEvent => "TableEvent",

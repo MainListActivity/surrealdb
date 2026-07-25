@@ -889,14 +889,14 @@ pub async fn init<C: TransactionBuilderFactory + BucketStoreProvider>(
 	let (dbs, router_state) =
 		builder.build_with_factory_path_and_router_state::<C>(&opt.path, composer).await?;
 	// Ensure the storage version is up to date to prevent corruption.
-	// OutdatedStorageVersion is a permanent condition (the data on disk is from
-	// an older version), so retrying it would waste time and delay pod restarts
-	// in Kubernetes environments where operators need fast failure feedback.
+	// Storage version/format mismatches are permanent until an operator runs the
+	// explicit migrator or supplies the required fork binary. Retrying would
+	// only delay fast failure feedback to readiness and pod supervisors.
 	let (_, is_new) = retry_with_timeout_check(
 		"check_version",
 		startup_operation_timeout,
 		|| async { dbs.check_version().await },
-		|e| e.to_string().contains("out-of-date"),
+		surrealdb_core::err::is_storage_compatibility_error,
 	)
 	.await?;
 	// Create default namespace and database if not disabled

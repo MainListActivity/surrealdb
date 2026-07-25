@@ -41,6 +41,7 @@ impl RemoveQuotaStatement {
 				name: database.clone(),
 			}
 		})?;
+		txn.quota_usage(db.namespace_id, db.database_id).ensure_writable_for_update().await?;
 		let Some(current) = txn.get_db_quota(db.namespace_id, db.database_id, None).await? else {
 			if self.if_exists {
 				return Ok(Value::None);

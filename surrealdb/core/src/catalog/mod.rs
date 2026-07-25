@@ -10,10 +10,12 @@ mod access;
 pub(crate) mod aggregation;
 mod auth;
 mod database;
+mod fork_storage;
 mod module;
 mod namespace;
 pub(crate) mod providers;
 mod quota;
+mod quota_usage;
 mod record;
 mod schema;
 mod subscription;
@@ -27,9 +29,11 @@ mod test;
 
 pub(crate) use access::*;
 pub(crate) use database::*;
+pub(crate) use fork_storage::*;
 pub(crate) use module::*;
 pub(crate) use namespace::*;
 pub(crate) use quota::*;
+pub(crate) use quota_usage::*;
 pub(crate) use record::*;
 pub use schema::ApiMethod;
 pub(crate) use schema::{

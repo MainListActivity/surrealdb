@@ -41,8 +41,12 @@ impl KVValue for MajorVersion {
 }
 
 impl MajorVersion {
-	/// The latest version
-	pub const LATEST: u16 = 3;
+	/// High bit that makes vanilla and pre-marker forks reject this datastore.
+	pub const FORK_REQUIRED_FLAG: u16 = 0x8000;
+	/// Latest upstream storage major understood by this fork.
+	pub const UPSTREAM_LATEST: u16 = 3;
+	/// The latest fork-required version.
+	pub const LATEST: u16 = Self::FORK_REQUIRED_FLAG | Self::UPSTREAM_LATEST;
 	/// The latest version
 	pub fn latest() -> Self {
 		Self(Self::LATEST)
@@ -54,6 +58,14 @@ impl MajorVersion {
 	/// SurrealDB version 2
 	pub fn v2() -> Self {
 		Self(2)
+	}
+	/// Latest vanilla upstream storage version, accepted only by the explicit migrator.
+	pub fn upstream_latest() -> Self {
+		Self(Self::UPSTREAM_LATEST)
+	}
+	/// Whether opening this version requires a marker-aware native-quota fork.
+	pub fn requires_quota_fork(self) -> bool {
+		self.0 & Self::FORK_REQUIRED_FLAG != 0
 	}
 	/// Check if we are running the latest version
 	pub fn is_latest(self) -> bool {

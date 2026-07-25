@@ -44,6 +44,9 @@ mod tests;
 
 pub(crate) mod cache;
 pub(crate) mod index;
+// SDB-NQ-02 establishes the facade; SDB-NQ-03/SDB-NQ-04 consume it in mutation paths.
+#[allow(dead_code)]
+pub(crate) mod quota;
 pub(crate) mod sequences;
 pub(crate) mod slowlog;
 pub(crate) mod tasklease;

@@ -44,7 +44,9 @@ use crate::catalog::providers::{
 	ApiProvider, CatalogProvider, DatabaseProvider, NamespaceProvider, NodeProvider, TableProvider,
 	UserProvider,
 };
-use crate::catalog::{ApiDefinition, Index, NodeLiveQuery, SubscriptionDefinition};
+use crate::catalog::{
+	ApiDefinition, ForkStorageFormat, Index, NodeLiveQuery, SubscriptionDefinition,
+};
 use crate::cnf::dynamic::DynamicConfiguration;
 use crate::cnf::{CommonConfig, ConfigMap, LiveQueryEngine};
 use crate::ctx::{CancelHandle, Context};
@@ -89,7 +91,7 @@ use crate::kvs::tasklease::{LeaseHandler, TaskLeaseType};
 #[cfg(test)]
 use crate::kvs::testing::{RetryableConflictSite, maybe_inject_retryable_conflict};
 use crate::kvs::{
-	KVValue, LockType, NORMAL_BATCH_SIZE, TransactionType, is_retryable_transaction_conflict,
+	KVKey, KVValue, LockType, NORMAL_BATCH_SIZE, TransactionType, is_retryable_transaction_conflict,
 };
 use crate::lq::LiveQueryRouter;
 use crate::observe::{ExecutionObserver, NoopObserver};
@@ -1191,6 +1193,13 @@ impl Datastore {
 	pub async fn check_version(&self) -> Result<(MajorVersion, bool)> {
 		// Retry because concurrent instances may conflict when writing the version key
 		let (version, is_new) = Self::retry("Check version", || self.get_version()).await?;
+		// A vanilla v3 datastore is readable only after an explicit offline
+		// migration has installed counters, epochs, the fork version, and marker.
+		if version == MajorVersion::upstream_latest() {
+			bail!(Error::ForkStorageMigrationRequired {
+				actual: version.into(),
+			});
+		}
 		// Check we are running the latest version
 		if !version.is_latest() {
 			bail!(Error::OutdatedStorageVersion {
@@ -1198,6 +1207,21 @@ impl Datastore {
 				actual: version.into(),
 			});
 		}
+		// The high-bit version and structured marker are a pair. Never infer,
+		// repair, or upgrade a marker during ordinary startup.
+		let txn = self.transaction(Read, Optimistic).await?;
+		let marker_key = crate::key::format::StorageFormat::new();
+		let marker = txn.get(&marker_key.encode_key()?, None).await?;
+		txn.cancel().await?;
+		let marker = marker.ok_or_else(|| Error::ForkStorageFormatIncompatible {
+			reason: "fork-required format marker is missing".to_owned(),
+		})?;
+		let marker = ForkStorageFormat::kv_decode_value(&marker, ()).map_err(|error| {
+			Error::ForkStorageFormatIncompatible {
+				reason: format!("fork-required format marker cannot be decoded: {error}"),
+			}
+		})?;
+		marker.validate()?;
 		// Everything ok
 		Ok((version, is_new))
 	}
@@ -1225,12 +1249,25 @@ impl Datastore {
 				let rng = crate::key::version::proceeding();
 				let keys = catch!(txn, txn.keys(rng, 1, 0, None).await);
 				// Check the storage if there are any other keys set
-				let version = if keys.is_empty() {
+				if keys.is_empty() {
 					// There are no keys set in storage, so this is a new database
-					MajorVersion::latest()
+					let version = MajorVersion::latest();
+					// The version and marker commit atomically. A vanilla or old
+					// fork sees the high bit and refuses before touching data.
+					catch!(txn, txn.replace(&key, &version).await);
+					catch!(
+						txn,
+						txn.replace(
+							&crate::key::format::StorageFormat::new(),
+							&ForkStorageFormat::current(),
+						)
+						.await
+					);
+					catch!(txn, txn.commit().await);
+					(version, true)
 				} else {
-					// There were keys in storage, so this is an upgrade.
-					// Log the first key found for diagnostic purposes.
+					// Existing unversioned data must be handled by an explicit
+					// migrator. Ordinary startup remains completely read-only.
 					warn!(
 						target: TARGET,
 						first_key = ?keys.first().map(|k| format!("{:?}", k)),
@@ -1238,14 +1275,9 @@ impl Datastore {
 						 This storage contains data from a previous SurrealDB version. \
 						 The server will not start until the data is migrated or removed."
 					);
-					MajorVersion::v1()
-				};
-				// Attempt to set the current version in storage
-				catch!(txn, txn.replace(&key, &version).await);
-				// We set the version, so commit the transaction
-				catch!(txn, txn.commit().await);
-				// Return the current version
-				(version, true)
+					catch!(txn, txn.cancel().await);
+					(MajorVersion::v1(), false)
+				}
 			}
 		};
 		// Everything ok
