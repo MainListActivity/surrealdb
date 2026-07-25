@@ -285,5 +285,10 @@ harness = false
 required-features = ["kv-rocksdb"]
 
 [[bench]]
+name = "quota"
+harness = false
+required-features = ["kv-rocksdb"]
+
+[[bench]]
 name = "import_load"
 harness = false

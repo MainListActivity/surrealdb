@@ -27,12 +27,15 @@ mod multireader;
 mod multiwriter_different_keys;
 mod multiwriter_same_keys_allow;
 mod multiwriter_same_keys_conflict;
+mod quota_backend_contract;
 #[cfg(feature = "kv-mem")]
 mod quota_info_test;
 #[cfg(feature = "kv-mem")]
 mod quota_rebuild_test;
 #[cfg(feature = "kv-mem")]
 mod quota_record_test;
+#[cfg(feature = "kv-rocksdb")]
+mod quota_rocksdb_certification;
 #[cfg(feature = "kv-mem")]
 mod quota_table_field_test;
 #[cfg(feature = "kv-mem")]
@@ -102,6 +105,7 @@ mod mem {
 		multireader,
 		multiwriter_different_keys,
 		multiwriter_same_keys_conflict,
+		quota_backend_contract,
 	);
 }
 
@@ -134,7 +138,8 @@ mod rocksdb {
 		multireader,
 		multiwriter_different_keys,
 		multiwriter_same_keys_conflict,
-		metrics
+		metrics,
+		quota_backend_contract,
 	);
 }
 

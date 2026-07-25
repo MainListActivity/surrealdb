@@ -19,6 +19,8 @@ use crate::key::database::qub::QuotaTableBucket;
 use crate::key::database::que::QuotaEpochRoot;
 use crate::key::database::quf::QuotaFieldUsage;
 use crate::key::database::qur::QuotaRecordUsage;
+#[cfg(test)]
+use crate::kvs::testing::{QuotaFaultSite, maybe_inject_quota_fault};
 use crate::kvs::{KVKey, KVValue, NORMAL_BATCH_SIZE};
 use crate::val::{Datetime, Object, TableName, Value};
 
@@ -154,6 +156,8 @@ impl Transaction {
 			quota_state.current = QuotaTransactionSnapshot::default();
 			return Ok(());
 		}
+		#[cfg(test)]
+		maybe_inject_quota_fault(QuotaFaultSite::BeforeCounterWrite, self.node_id_for_test())?;
 		let mut violations = Vec::new();
 		let mut violations_truncated = false;
 
@@ -341,6 +345,8 @@ impl Transaction {
 			}
 		}
 
+		#[cfg(test)]
+		maybe_inject_quota_fault(QuotaFaultSite::AfterCounterWrite, self.node_id_for_test())?;
 		if !violations.is_empty() {
 			let policy = snapshot
 				.databases

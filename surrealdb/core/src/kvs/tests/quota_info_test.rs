@@ -171,7 +171,8 @@ async fn streaming_executor_returns_the_same_quota_structure_contract() {
 #[tokio::test]
 async fn quota_ddl_returns_operation_results_and_preserves_latest_change_after_remove() {
 	let observer = Arc::new(CapturingQuotaObserver::default());
-	let configured: Arc<dyn ExecutionObserver> = observer.clone();
+	let configured = Arc::clone(&observer);
+	let configured: Arc<dyn ExecutionObserver> = configured;
 	let ds =
 		Datastore::builder().with_observer(configured).build_with_path("memory").await.unwrap();
 	let root = Session::owner();

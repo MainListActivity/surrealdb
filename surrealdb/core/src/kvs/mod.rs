@@ -129,10 +129,21 @@ pub(crate) mod testing {
 		ConcurrentIndexReservationRelease,
 	}
 
+	#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+	pub(crate) enum QuotaFaultSite {
+		BeforeBusinessMutation,
+		AfterBusinessMutation,
+		BeforeCounterWrite,
+		AfterCounterWrite,
+		BeforeCommit,
+		CommitOutcomeUnknown,
+	}
+
 	static RETRYABLE_CONFLICTS: OnceLock<Mutex<HashMap<(RetryableConflictSite, Uuid), usize>>> =
 		OnceLock::new();
 	static NON_RETRYABLE_ERRORS: OnceLock<Mutex<HashMap<(NonRetryableErrorSite, Uuid), usize>>> =
 		OnceLock::new();
+	static QUOTA_FAULTS: OnceLock<Mutex<HashMap<(QuotaFaultSite, Uuid), usize>>> = OnceLock::new();
 
 	fn retryable_conflicts() -> &'static Mutex<HashMap<(RetryableConflictSite, Uuid), usize>> {
 		RETRYABLE_CONFLICTS.get_or_init(|| Mutex::new(HashMap::new()))
@@ -140,6 +151,10 @@ pub(crate) mod testing {
 
 	fn non_retryable_errors() -> &'static Mutex<HashMap<(NonRetryableErrorSite, Uuid), usize>> {
 		NON_RETRYABLE_ERRORS.get_or_init(|| Mutex::new(HashMap::new()))
+	}
+
+	fn quota_faults() -> &'static Mutex<HashMap<(QuotaFaultSite, Uuid), usize>> {
+		QUOTA_FAULTS.get_or_init(|| Mutex::new(HashMap::new()))
 	}
 
 	pub(crate) fn inject_retryable_conflict(
@@ -218,6 +233,35 @@ pub(crate) mod testing {
 		Err(super::Error::Internal(format!("injected non-retryable error at {site:?}")).into())
 	}
 
+	pub(crate) fn inject_quota_fault(site: QuotaFaultSite, node_id: Uuid) -> QuotaFaultGuard {
+		inject_quota_faults(site, node_id, 1)
+	}
+
+	pub(crate) fn inject_quota_faults(
+		site: QuotaFaultSite,
+		node_id: Uuid,
+		count: usize,
+	) -> QuotaFaultGuard {
+		assert!(count > 0);
+		quota_faults().lock().unwrap().insert((site, node_id), count);
+		QuotaFaultGuard {
+			site,
+			node_id,
+		}
+	}
+
+	pub(crate) fn maybe_inject_quota_fault(site: QuotaFaultSite, node_id: Uuid) -> Result<()> {
+		let mut faults = quota_faults().lock().unwrap();
+		let Some(remaining) = faults.get_mut(&(site, node_id)) else {
+			return Ok(());
+		};
+		*remaining -= 1;
+		if *remaining == 0 {
+			faults.remove(&(site, node_id));
+		}
+		Err(super::Error::Internal(format!("injected quota fault at {site:?}")).into())
+	}
+
 	pub(crate) struct RetryableConflictGuard {
 		site: RetryableConflictSite,
 		node_id: Uuid,
@@ -238,6 +282,17 @@ pub(crate) mod testing {
 	impl Drop for NonRetryableErrorGuard {
 		fn drop(&mut self) {
 			non_retryable_errors().lock().unwrap().remove(&(self.site, self.node_id));
+		}
+	}
+
+	pub(crate) struct QuotaFaultGuard {
+		site: QuotaFaultSite,
+		node_id: Uuid,
+	}
+
+	impl Drop for QuotaFaultGuard {
+		fn drop(&mut self) {
+			quota_faults().lock().unwrap().remove(&(self.site, self.node_id));
 		}
 	}
 }

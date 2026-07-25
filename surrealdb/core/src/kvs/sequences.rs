@@ -205,6 +205,12 @@ impl Sequences {
 			nid,
 		}
 	}
+
+	#[cfg(test)]
+	pub(crate) fn node_id_for_test(&self) -> Uuid {
+		self.nid
+	}
+
 	/// Cleans up all sequences associated with a removed namespace.
 	///
 	/// This method is called when a namespace is deleted to remove all cached

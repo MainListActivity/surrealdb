@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "manifest_revision": "native-quota-v1-dev.1",
+  "manifest_revision": "native-quota-v1-dev.2",
   "fork_id": "mainlistactivity/surrealdb-native-quota",
   "fork_release": "3.3.0-native-quota.1",
   "capabilities": [
@@ -38,29 +38,85 @@
     {
       "name": "memory",
       "hard_quota_certified": true,
-      "production": false
+      "production": false,
+      "persistent_restart_certified": false,
+      "certification_revision": "native-quota-contract-v1",
+      "contract_suite": [
+        "transaction-contention",
+        "conflict-retry",
+        "multi-node",
+        "atomic-fault-injection",
+        "commit-outcome-unknown",
+        "policy-generation-race",
+        "rebuild-epoch"
+      ],
+      "network_fault_model": "not-applicable-in-memory"
     },
     {
       "name": "rocksdb",
-      "hard_quota_certified": false,
-      "production": false
+      "hard_quota_certified": true,
+      "production": true,
+      "persistent_restart_certified": true,
+      "certification_revision": "native-quota-contract-v1",
+      "contract_suite": [
+        "transaction-contention",
+        "conflict-retry",
+        "multi-node",
+        "atomic-fault-injection",
+        "commit-outcome-unknown",
+        "policy-generation-race",
+        "rebuild-epoch",
+        "persistent-restart"
+      ],
+      "network_fault_model": "not-applicable-embedded"
     },
     {
       "name": "surrealkv",
       "hard_quota_certified": false,
-      "production": false
+      "production": false,
+      "persistent_restart_certified": false,
+      "certification_revision": null,
+      "contract_suite": [],
+      "network_fault_model": "pending"
     },
     {
       "name": "tikv",
       "hard_quota_certified": false,
-      "production": false
+      "production": false,
+      "persistent_restart_certified": false,
+      "certification_revision": null,
+      "contract_suite": [],
+      "network_fault_model": "pending"
     },
     {
       "name": "indxdb",
       "hard_quota_certified": false,
-      "production": false
+      "production": false,
+      "persistent_restart_certified": false,
+      "certification_revision": null,
+      "contract_suite": [],
+      "network_fault_model": "pending"
     }
   ],
+  "performance": {
+    "benchmark_revision": "native-quota-rocksdb-v1",
+    "dataset": {
+      "warmup_operations": 32,
+      "sample_operations": 256,
+      "batch_size": 16
+    },
+    "baseline_artifact": "native-quota-rocksdb-v1.json",
+    "baseline_command": "cargo bench -p surrealdb-core --bench quota --features kv-rocksdb -- --output ../../compatibility/native-quota-rocksdb-v1.json",
+    "repeatable_command": "cargo bench -p surrealdb-core --bench quota --features kv-rocksdb -- --output ../../target/native-quota-benchmark.json",
+    "candidate_command": "cargo bench -p surrealdb-core --bench quota --features kv-rocksdb -- --baseline ../../compatibility/native-quota-rocksdb-v1.json --output ../../target/native-quota-benchmark.json",
+    "thresholds_percent": {
+      "maximum_throughput_regression": 10,
+      "p95_latency_regression": 15,
+      "p99_latency_regression": 20,
+      "kv_write_amplification_regression": 10,
+      "storage_growth_regression": 10
+    }
+  },
   "oci_labels": {
     "org.opencontainers.image.vendor": "MainListActivity",
     "io.mainlistactivity.surrealdb.fork": "mainlistactivity/surrealdb-native-quota",

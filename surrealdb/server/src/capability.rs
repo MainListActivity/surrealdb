@@ -82,6 +82,59 @@ pub struct BackendContract {
 	pub hard_quota_certified: bool,
 	/// Whether this backend is approved for production by this release.
 	pub production: bool,
+	/// Whether durable close/reopen and interrupted rebuild recovery passed.
+	pub persistent_restart_certified: bool,
+	/// Immutable contract suite revision, absent for uncertified backends.
+	pub certification_revision: Option<String>,
+	/// Named backend-neutral contracts executed for this backend.
+	pub contract_suite: Vec<String>,
+	/// Network fault coverage or the reason it does not apply.
+	pub network_fault_model: String,
+}
+
+/// Fixed benchmark dataset.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct PerformanceDataset {
+	/// Operations excluded from samples while caches warm.
+	pub warmup_operations: u32,
+	/// Measured operations per workload.
+	pub sample_operations: u32,
+	/// Logical records in the batch workload.
+	pub batch_size: u32,
+}
+
+/// Maximum accepted regression percentages against a matching baseline.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct PerformanceThresholds {
+	/// Maximum throughput reduction.
+	pub maximum_throughput_regression: u16,
+	/// Maximum p95 latency increase.
+	pub p95_latency_regression: u16,
+	/// Maximum p99 latency increase.
+	pub p99_latency_regression: u16,
+	/// Maximum KV writes-per-resource increase.
+	pub kv_write_amplification_regression: u16,
+	/// Maximum persisted bytes-per-resource increase.
+	pub storage_growth_regression: u16,
+}
+
+/// Release benchmark identity, dataset, command, and explicit gates.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct PerformanceManifest {
+	/// Benchmark schema and workload revision.
+	pub benchmark_revision: String,
+	/// Fixed workload sizes.
+	pub dataset: PerformanceDataset,
+	/// Expected baseline artifact file name.
+	pub baseline_artifact: String,
+	/// Command that creates a baseline artifact on the pinned runner.
+	pub baseline_command: String,
+	/// Command that reproduces a candidate artifact without comparison.
+	pub repeatable_command: String,
+	/// Command that compares a candidate with the release baseline.
+	pub candidate_command: String,
+	/// Release regression gates.
+	pub thresholds_percent: PerformanceThresholds,
 }
 
 /// Machine-readable release compatibility manifest embedded in the server and CLI.
@@ -109,6 +162,8 @@ pub struct CompatibilityManifest {
 	pub migration: MigrationManifest,
 	/// Backend certification allowlist.
 	pub backends: Vec<BackendContract>,
+	/// Reproducible benchmark and regression-gate contract.
+	pub performance: PerformanceManifest,
 	/// Static metadata copied into OCI image labels by release automation.
 	pub oci_labels: BTreeMap<String, String>,
 }
@@ -172,6 +227,46 @@ impl CompatibilityManifest {
 		if self.backends.iter().any(|backend| !backend_names.insert(&backend.name)) {
 			bail!("native quota backend allowlist contains duplicate names");
 		}
+		let required_suite = [
+			"transaction-contention",
+			"conflict-retry",
+			"multi-node",
+			"atomic-fault-injection",
+			"commit-outcome-unknown",
+			"policy-generation-race",
+			"rebuild-epoch",
+		];
+		for backend in &self.backends {
+			if backend.production
+				&& (!backend.hard_quota_certified
+					|| !backend.persistent_restart_certified
+					|| backend.name == "memory"
+					|| backend.certification_revision.as_deref()
+						!= Some("native-quota-contract-v1")
+					|| backend.network_fault_model == "pending"
+					|| required_suite.iter().any(|required| {
+						!backend.contract_suite.iter().any(|item| item == required)
+					})) {
+				bail!(
+					"production native quota backend '{}' lacks complete certification evidence",
+					backend.name
+				);
+			}
+		}
+		if !self.backends.iter().any(|backend| backend.production) {
+			bail!("native quota stable release requires a production-certified persistent backend");
+		}
+		if self.performance.dataset.warmup_operations == 0
+			|| self.performance.dataset.sample_operations == 0
+			|| self.performance.dataset.batch_size == 0
+			|| self.performance.benchmark_revision.is_empty()
+			|| self.performance.baseline_artifact.is_empty()
+			|| self.performance.baseline_command.is_empty()
+			|| self.performance.repeatable_command.is_empty()
+			|| self.performance.candidate_command.is_empty()
+		{
+			bail!("native quota performance manifest is incomplete");
+		}
 		Ok(())
 	}
 
@@ -181,6 +276,10 @@ impl CompatibilityManifest {
 				name: name.to_owned(),
 				hard_quota_certified: false,
 				production: false,
+				persistent_restart_certified: false,
+				certification_revision: None,
+				contract_suite: Vec::new(),
+				network_fault_model: "unknown".to_owned(),
 			}
 		})
 	}
@@ -494,7 +593,9 @@ mod tests {
 		memory.require(&[NATIVE_QUOTA_CAPABILITY.to_owned()]).unwrap();
 
 		let rocks = CapabilityDocument::current(ready_storage("rocksdb")).unwrap();
-		assert!(rocks.require(&[NATIVE_QUOTA_CAPABILITY.to_owned()]).is_err());
+		rocks.require(&[NATIVE_QUOTA_CAPABILITY.to_owned()]).unwrap();
+		assert!(rocks.backend.production);
+		assert!(rocks.backend.persistent_restart_certified);
 
 		let mut migrating = memory;
 		migrating.storage.ready = false;
@@ -502,6 +603,24 @@ mod tests {
 		migrating.storage.state = NativeQuotaStorageState::Migrating;
 		migrating.storage.marker.as_mut().unwrap().migration_state = "in_progress".to_owned();
 		assert!(migrating.require(&[NATIVE_QUOTA_CAPABILITY.to_owned()]).is_err());
+	}
+
+	#[test]
+	fn production_backend_and_performance_evidence_fail_closed() {
+		let mut manifest = CompatibilityManifest::embedded().unwrap();
+		let rocks = manifest.backends.iter_mut().find(|backend| backend.name == "rocksdb").unwrap();
+		rocks.persistent_restart_certified = false;
+		assert!(manifest.validate().unwrap_err().to_string().contains("certification evidence"));
+
+		let mut manifest = CompatibilityManifest::embedded().unwrap();
+		for backend in &mut manifest.backends {
+			backend.production = false;
+		}
+		assert!(manifest.validate().unwrap_err().to_string().contains("production-certified"));
+
+		let mut manifest = CompatibilityManifest::embedded().unwrap();
+		manifest.performance.dataset.sample_operations = 0;
+		assert!(manifest.validate().unwrap_err().to_string().contains("performance manifest"));
 	}
 
 	#[test]

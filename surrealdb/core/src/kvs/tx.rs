@@ -63,8 +63,8 @@ use crate::kvs::quota::QuotaTransactionState;
 use crate::kvs::sequences::Sequences;
 #[cfg(test)]
 use crate::kvs::testing::{
-	NonRetryableErrorSite, RetryableConflictSite, maybe_inject_non_retryable_error,
-	maybe_inject_retryable_conflict,
+	NonRetryableErrorSite, QuotaFaultSite, RetryableConflictSite, maybe_inject_non_retryable_error,
+	maybe_inject_quota_fault, maybe_inject_retryable_conflict,
 };
 use crate::kvs::{
 	BoxTimeStamp, BoxTimeStampImpl, Direction, Error as KvsError, KVKey, KVValue, Transactor,
@@ -697,6 +697,11 @@ impl ReferenceTargets {
 }
 
 impl Transaction {
+	#[cfg(test)]
+	pub(crate) fn node_id_for_test(&self) -> Uuid {
+		self.sequences.node_id_for_test()
+	}
+
 	/// Returns `true` if any `DEFINE FIELD ... REFERENCE` in this database could
 	/// target a record in `table` (so a record in `table` may have incoming
 	/// reference keys).
@@ -1170,6 +1175,20 @@ impl Transaction {
 			// operation that first made commit impossible.
 			return Err(e);
 		}
+		#[cfg(test)]
+		if let Err(e) = maybe_inject_quota_fault(
+			QuotaFaultSite::BeforeCommit,
+			self.sequences.node_id_for_test(),
+		) {
+			self.clear_pending_quota_events().await;
+			if let Err(err) = self.cancel().await {
+				tracing::warn!(
+					target: "surrealdb::core::kvs::tx",
+					"transaction cleanup failed after injected pre-commit quota fault; preserving original error {e}: {err}"
+				);
+			}
+			return Err(e);
+		}
 		// Commit the transaction
 		if let Err(e) = self.tr.commit().await {
 			let quota_conflict = self.has_flushed_quota_admission().await
@@ -1219,6 +1238,12 @@ impl Transaction {
 			self.clear_pending_quota_events().await;
 			anyhow::bail!(e);
 		}
+		#[cfg(test)]
+		let commit_outcome_unknown = maybe_inject_quota_fault(
+			QuotaFaultSite::CommitOutcomeUnknown,
+			self.sequences.node_id_for_test(),
+		)
+		.err();
 		if let Err(err) = self.release_index_build_reservations().await {
 			tracing::warn!(
 				target: "surrealdb::core::kvs::tx",
@@ -1231,6 +1256,14 @@ impl Transaction {
 		if self.trigger_async_event.load(Ordering::Relaxed) {
 			// Notify after commit so queued events are visible to workers.
 			self.async_event_trigger.notify_one();
+		}
+		#[cfg(test)]
+		if let Some(error) = commit_outcome_unknown {
+			self.emit_transaction_event_with_class(
+				Outcome::Error,
+				Some(crate::observe::error_class::STORAGE),
+			);
+			return Err(error);
 		}
 		self.emit_transaction_event(Outcome::Success);
 		Ok(())
@@ -4115,7 +4148,17 @@ impl TableProvider for Transaction {
 		Box::pin(
 			async move {
 				let key = crate::key::record::new(ns, db, tb, id);
+				#[cfg(test)]
+				maybe_inject_quota_fault(
+					QuotaFaultSite::BeforeBusinessMutation,
+					self.sequences.node_id_for_test(),
+				)?;
 				self.put(&key, record.as_ref()).await?;
+				#[cfg(test)]
+				maybe_inject_quota_fault(
+					QuotaFaultSite::AfterBusinessMutation,
+					self.sequences.node_id_for_test(),
+				)?;
 				self.quota_usage(ns, db).register_record_delta(tb, 1).await?;
 				// Set the value in the cache
 				let qey = cache::tx::Lookup::Record(ns, db, tb, id);
@@ -4140,7 +4183,17 @@ impl TableProvider for Transaction {
 				// Set the value in the datastore
 				let key = crate::key::record::new(ns, db, tb, id);
 				let existed = self.exists(&key, None).await?;
+				#[cfg(test)]
+				maybe_inject_quota_fault(
+					QuotaFaultSite::BeforeBusinessMutation,
+					self.sequences.node_id_for_test(),
+				)?;
 				self.set(&key, record.as_ref()).await?;
+				#[cfg(test)]
+				maybe_inject_quota_fault(
+					QuotaFaultSite::AfterBusinessMutation,
+					self.sequences.node_id_for_test(),
+				)?;
 				if !existed {
 					self.quota_usage(ns, db).register_record_delta(tb, 1).await?;
 				}
@@ -4166,7 +4219,17 @@ impl TableProvider for Transaction {
 				// Delete the value in the datastore
 				let key = crate::key::record::new(ns, db, tb, id);
 				let existed = self.exists(&key, None).await?;
+				#[cfg(test)]
+				maybe_inject_quota_fault(
+					QuotaFaultSite::BeforeBusinessMutation,
+					self.sequences.node_id_for_test(),
+				)?;
 				self.del(&key).await?;
+				#[cfg(test)]
+				maybe_inject_quota_fault(
+					QuotaFaultSite::AfterBusinessMutation,
+					self.sequences.node_id_for_test(),
+				)?;
 				if existed {
 					self.quota_usage(ns, db).register_record_delta(tb, -1).await?;
 				}
