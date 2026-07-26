@@ -1,6 +1,6 @@
-Status: open
-Label: ready-for-agent
-Assignee: unassigned
+Status: done
+Label: done
+Assignee: /root
 
 # SDB-NQ-08 — 建立私有 fork 发布与供应链门
 
@@ -18,14 +18,40 @@ Assignee: unassigned
 
 ## Acceptance criteria
 
-- [ ] 同一签名 digest 从 CI→canary→staging→production 晋级，环境不重建。
-- [ ] nightly 与 stable channel 隔离；production 只 pin digest。
-- [ ] 未通过任一 quota/backend gate 的 candidate 无法产生；未通过 surreal_ck 双仓验收的 candidate 无法晋级 stable。
-- [ ] 匹配 CLI、manifest、image labels、capability 文档引用相同 git SHA/release。
-- [ ] 上一 production release line 的 90 日支持与格式不可降级说明进入 release 文档。
-- [ ] 本任务以发布签名 candidate 与可工作的晋级门为完成；同一 digest 的 stable 晋级由 surreal_ck 双仓发布验收触发，避免仓间循环依赖。
+- [x] 同一签名 digest 从 CI→canary→staging→production 晋级，环境不重建。
+- [x] nightly 与 stable channel 隔离；production 只 pin digest。
+- [x] 未通过任一 quota/backend gate 的 candidate 无法产生；未通过 surreal_ck 双仓验收的 candidate 无法晋级 stable。
+- [x] 匹配 CLI、manifest、image labels、capability 文档引用相同 git SHA/release。
+- [x] 上一 production release line 的 90 日支持与格式不可降级说明进入 release 文档。
+- [x] 本任务以发布签名 candidate 与可工作的晋级门为完成；同一 digest 的 stable 晋级由 surreal_ck 双仓发布验收触发，避免仓间循环依赖。
 
 ## Dependencies
 
 - Blocked by: [`交付 capability、readiness、格式迁移与匹配 CLI`](06-capability-readiness-migration-cli.md)、[`认证持久 backend、并发一致性与性能`](07-backend-certification-fault-performance.md)
 - Blocks: [`surreal_ck：完成双仓 E2E、部署切换与发布验收`](/Users/y/IdeaProjects/surreal_ck/.scratch/native-resource-quota/issues/10-cross-repo-e2e-release.md)
+
+## Completion notes
+
+- 2026-07-25：官方 upstream 被固定为无 push URL 的只读 remote；每周同步只创建
+  `automation/upstream-sync-*` PR，冲突只开 issue，不再直推 `main` 或反向推送官方仓库。
+  `releases/sck-*` ruleset 禁止删除/force-push，并要求 review 后合并。
+- 2026-07-25：fork 官方 `Release` 工作流在非 `surrealdb/surrealdb` 仓库完整跳过；
+  stable/nightly 使用独立 GHCR repository，candidate gate 只接受 manifest 指定的 stable
+  repository、`candidate` channel 和受保护 `releases/sck-3.3` 上通过精确 SHA CI 的提交。
+- 2026-07-25：candidate workflow 串联 capability/format/release 契约、memory/RocksDB
+  hard-quota suite、RocksDB crash/restart、固定 performance baseline、amd64/arm64 CLI 与
+  multi-arch image smoke。任一 gate、HIGH/CRITICAL 漏洞检查或身份校验失败时，不创建
+  GitHub pre-release。
+- 2026-07-25：同一次 CLI build 组装 multi-arch image；release/full-SHA tag 不可覆盖，
+  中断重试只能复用两个 tag 已共同指向的 digest。镜像生成 SPDX SBOM、BuildKit
+  provenance、漏洞报告与 keyless Cosign 签名；CLI 和 candidate manifest 也签名。
+- 2026-07-25：签名 candidate manifest 将 CLI、OCI labels、运行中 RocksDB
+  `/capabilities`、兼容清单绑定到同一完整 git SHA、fork release 与 manifest revision；
+  同时固定 surrealdb-js `2.0.8`、production-certified RocksDB、format/mixed-version
+  与 rollback contract。
+- 2026-07-25：canary/staging/production 不含 build/push，只验证原 candidate 签名并
+  smoke 同一 digest 后生成签名晋级收据。production 不在手动选项中，只接受
+  `surreal_ck` 指定 workflow 的 keyless 签名验收 dispatch，且只记录 digest reference。
+- 2026-07-25：`doc/NATIVE_QUOTA_RELEASES.md` 记录环境配置、双仓 dispatch 契约、
+  exact-release-only mixed-version 策略、data format 不可降级和上一 production line
+  至少 90 日支持窗口。

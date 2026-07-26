@@ -73,6 +73,55 @@ pub struct MigrationManifest {
 	pub minimum_cli_release: String,
 }
 
+/// Immutable release artifacts and cross-repository promotion rules.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ReleaseSupplyChainManifest {
+	/// Candidate release manifest format major.
+	pub candidate_manifest_format: u16,
+	/// Stable candidate image repository owned by the fork.
+	pub image_repository: String,
+	/// Isolated image repository for non-promotable nightly builds.
+	pub nightly_image_repository: String,
+	/// Protected stable release branch for this release.
+	pub stable_branch: String,
+	/// Production deployment reference policy.
+	pub production_reference: String,
+	/// Required immutable OCI tag identities.
+	pub immutable_tag_kinds: Vec<String>,
+	/// Ordered promotion environments.
+	pub promotion_environments: Vec<String>,
+	/// Evidence required before production promotion.
+	pub required_attestations: Vec<String>,
+	/// Downstream repository authorized to accept a candidate.
+	pub downstream_repository: String,
+	/// Downstream workflow whose keyless identity signs acceptance.
+	pub downstream_acceptance_workflow: String,
+}
+
+/// Mixed-version and rollback safety contract.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct MixedVersionManifest {
+	/// Cluster compatibility policy.
+	pub policy: String,
+	/// Fork releases allowed in one cluster during a rollout.
+	pub compatible_fork_releases: Vec<String>,
+	/// Whether an upstream vanilla binary may open this datastore.
+	pub vanilla_binary_allowed: bool,
+	/// Whether an older fork binary may open this datastore.
+	pub older_fork_binary_allowed: bool,
+	/// Whether a migrated data format can be downgraded.
+	pub data_format_downgrade_supported: bool,
+	/// Whether process rollback must retain a format-compatible release.
+	pub process_rollback_requires_same_release_format: bool,
+}
+
+/// Maintenance window for the previously deployed production line.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct SupportManifest {
+	/// Minimum support window after a new production line is promoted.
+	pub previous_production_line_days: u16,
+}
+
 /// One backend's hard-quota certification.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct BackendContract {
@@ -160,6 +209,12 @@ pub struct CompatibilityManifest {
 	pub sdk: SdkManifest,
 	/// Datastore migration compatibility.
 	pub migration: MigrationManifest,
+	/// Candidate build, signing, and promotion contract.
+	pub release_supply_chain: ReleaseSupplyChainManifest,
+	/// Mixed-version and rollback contract.
+	pub mixed_version: MixedVersionManifest,
+	/// Previous production line maintenance contract.
+	pub support: SupportManifest,
 	/// Backend certification allowlist.
 	pub backends: Vec<BackendContract>,
 	/// Reproducible benchmark and regression-gate contract.
@@ -187,6 +242,9 @@ impl CompatibilityManifest {
 		if self.fork_id != fork_id || self.fork_release != release {
 			bail!("native quota compatibility manifest fork identity does not match this binary");
 		}
+		if self.manifest_revision.contains("-dev") {
+			bail!("native quota release compatibility manifest revision must be immutable");
+		}
 		if !self.capabilities.iter().any(|item| item == NATIVE_QUOTA_CAPABILITY) {
 			bail!("native quota compatibility manifest is missing {NATIVE_QUOTA_CAPABILITY}");
 		}
@@ -213,10 +271,60 @@ impl CompatibilityManifest {
 		{
 			bail!("native quota migration manifest does not match this binary");
 		}
+		let supply_chain = &self.release_supply_chain;
+		if supply_chain.candidate_manifest_format != 1
+			|| supply_chain.image_repository != "ghcr.io/mainlistactivity/surrealdb-native-quota"
+			|| supply_chain.nightly_image_repository
+				!= "ghcr.io/mainlistactivity/surrealdb-native-quota-nightly"
+			|| supply_chain.image_repository == supply_chain.nightly_image_repository
+			|| supply_chain.image_repository.contains("surrealdb/surrealdb")
+			|| supply_chain.nightly_image_repository.contains("surrealdb/surrealdb")
+			|| supply_chain.stable_branch != "releases/sck-3.3"
+			|| supply_chain.production_reference != "digest-only"
+			|| supply_chain.promotion_environments != ["canary", "staging", "production"]
+			|| supply_chain.downstream_repository != "MainListActivity/surreal_ck"
+			|| supply_chain.downstream_acceptance_workflow
+				!= ".github/workflows/native-quota-release-acceptance.yml"
+		{
+			bail!("native quota release supply-chain contract is invalid");
+		}
+		for tag in ["release", "git-sha"] {
+			if !supply_chain.immutable_tag_kinds.iter().any(|item| item == tag) {
+				bail!("native quota release supply chain is missing immutable '{tag}' tag");
+			}
+		}
+		for evidence in [
+			"signature",
+			"spdx-sbom",
+			"slsa-provenance",
+			"vulnerability-report",
+			"surreal-ck-acceptance",
+		] {
+			if !supply_chain.required_attestations.iter().any(|item| item == evidence) {
+				bail!("native quota release supply chain is missing '{evidence}' evidence");
+			}
+		}
+		if self.mixed_version.policy != "exact-release-only"
+			|| !self.mixed_version.compatible_fork_releases.iter().any(|item| item == release)
+			|| self.mixed_version.vanilla_binary_allowed
+			|| self.mixed_version.older_fork_binary_allowed
+			|| self.mixed_version.data_format_downgrade_supported
+			|| !self.mixed_version.process_rollback_requires_same_release_format
+		{
+			bail!("native quota mixed-version and rollback contract is invalid");
+		}
+		if self.support.previous_production_line_days < 90 {
+			bail!("native quota previous production line support must be at least 90 days");
+		}
 		if !self.sdk.protocols.iter().any(|protocol| protocol == "http")
 			|| !self.sdk.protocols.iter().any(|protocol| protocol == "ws")
 		{
 			bail!("native quota SDK manifest must cover HTTP and WebSocket protocols");
+		}
+		if self.sdk.surrealdb_js.is_empty()
+			|| self.sdk.surrealdb_js.iter().any(|release| semver::Version::parse(release).is_err())
+		{
+			bail!("native quota SDK manifest must pin at least one exact surrealdb-js release");
 		}
 		let current_release = semver::Version::parse(&self.fork_release)?;
 		let minimum_release = semver::Version::parse(&self.migration.minimum_cli_release)?;
@@ -568,6 +676,10 @@ mod tests {
 			manifest.oci_labels.get("io.mainlistactivity.surrealdb.quota-contract"),
 			Some(&NATIVE_QUOTA_CAPABILITY.to_owned())
 		);
+		assert_eq!(
+			manifest.oci_labels.get("io.mainlistactivity.surrealdb.manifest-revision"),
+			Some(&manifest.manifest_revision)
+		);
 	}
 
 	#[test]
@@ -621,6 +733,21 @@ mod tests {
 		let mut manifest = CompatibilityManifest::embedded().unwrap();
 		manifest.performance.dataset.sample_operations = 0;
 		assert!(manifest.validate().unwrap_err().to_string().contains("performance manifest"));
+	}
+
+	#[test]
+	fn release_supply_chain_and_rollback_contract_fail_closed() {
+		let mut manifest = CompatibilityManifest::embedded().unwrap();
+		manifest.release_supply_chain.production_reference = "tag".to_owned();
+		assert!(manifest.validate().unwrap_err().to_string().contains("supply-chain"));
+
+		let mut manifest = CompatibilityManifest::embedded().unwrap();
+		manifest.mixed_version.data_format_downgrade_supported = true;
+		assert!(manifest.validate().unwrap_err().to_string().contains("mixed-version"));
+
+		let mut manifest = CompatibilityManifest::embedded().unwrap();
+		manifest.support.previous_production_line_days = 89;
+		assert!(manifest.validate().unwrap_err().to_string().contains("90 days"));
 	}
 
 	#[test]

@@ -73,6 +73,10 @@ jobs:
 
   validate-inputs:
     name: Validate inputs
+    # This is the official upstream release pipeline. Fork releases are produced
+    # only by native-quota-candidate.yml and promoted by digest, so no scheduled
+    # job in the fork can publish to surrealdb/surrealdb namespaces.
+    if: github.repository == 'surrealdb/surrealdb'
     runs-on: ubuntu-latest
     steps:
       - name: Harden the runner (Audit all outbound calls)

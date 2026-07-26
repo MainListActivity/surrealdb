@@ -1,0 +1,423 @@
+name: Native quota promote
+
+run-name: >-
+  Native quota promote
+  ${{ github.event.client_payload.candidate_tag || inputs.candidate_tag }}
+  to ${{ github.event_name == 'repository_dispatch' && 'production' || inputs.target }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_tag:
+        description: Signed candidate GitHub release tag
+        required: true
+        type: string
+      expected_digest:
+        description: Expected immutable sha256 image digest
+        required: true
+        type: string
+      target:
+        description: Manual promotion target (production is downstream-only)
+        required: true
+        type: choice
+        options:
+          - canary
+          - staging
+  repository_dispatch:
+    types:
+      - native-quota-stable-accepted
+
+concurrency:
+  group: >-
+    native-quota-promote-${{
+      github.event.client_payload.candidate_tag || inputs.candidate_tag
+    }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+permissions: {}
+
+jobs:
+  verify:
+    name: Verify candidate, prior stages, and downstream acceptance
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      target: ${{ steps.metadata.outputs.target }}
+      candidate_tag: ${{ steps.metadata.outputs.candidate_tag }}
+      release: ${{ steps.metadata.outputs.release }}
+      git_sha: ${{ steps.metadata.outputs.git_sha }}
+      digest: ${{ steps.metadata.outputs.digest }}
+      image_reference: ${{ steps.metadata.outputs.image_reference }}
+      acceptance_run_url: ${{ steps.metadata.outputs.acceptance_run_url }}
+    steps:
+      - name: Harden the runner
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout promotion verifier
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v3.0.6
+
+      - name: Resolve event inputs
+        id: inputs
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          MANUAL_TAG: ${{ inputs.candidate_tag }}
+          MANUAL_DIGEST: ${{ inputs.expected_digest }}
+          MANUAL_TARGET: ${{ inputs.target }}
+          DISPATCH_TAG: ${{ github.event.client_payload.candidate_tag }}
+          DISPATCH_DIGEST: ${{ github.event.client_payload.digest }}
+          DISPATCH_SHA: ${{ github.event.client_payload.git_sha }}
+          DISPATCH_RELEASE: ${{ github.event.client_payload.release }}
+          ACCEPTANCE_STATEMENT_B64: ${{ github.event.client_payload.acceptance_statement_b64 }}
+          ACCEPTANCE_BUNDLE_B64: ${{ github.event.client_payload.acceptance_bundle_b64 }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "repository_dispatch" ]; then
+            target=production
+            candidate_tag="$DISPATCH_TAG"
+            expected_digest="$DISPATCH_DIGEST"
+            test -n "$DISPATCH_SHA"
+            test -n "$DISPATCH_RELEASE"
+            test -n "$ACCEPTANCE_STATEMENT_B64"
+            test -n "$ACCEPTANCE_BUNDLE_B64"
+            printf '%s' "$ACCEPTANCE_STATEMENT_B64" | base64 --decode > surreal-ck-acceptance.json
+            printf '%s' "$ACCEPTANCE_BUNDLE_B64" | base64 --decode > surreal-ck-acceptance.sigstore.json
+          else
+            target="$MANUAL_TARGET"
+            candidate_tag="$MANUAL_TAG"
+            expected_digest="$MANUAL_DIGEST"
+          fi
+          case "$target" in
+            canary|staging|production) ;;
+            *) echo "::error::invalid target $target"; exit 1 ;;
+          esac
+          case "$expected_digest" in
+            sha256:[0-9a-f][0-9a-f]*) ;;
+            *) echo "::error::expected digest must be sha256"; exit 1 ;;
+          esac
+          {
+            echo "target=$target"
+            echo "candidate_tag=$candidate_tag"
+            echo "expected_digest=$expected_digest"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Download signed candidate evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.inputs.outputs.candidate_tag }}
+          TARGET: ${{ steps.inputs.outputs.target }}
+        run: |
+          set -euo pipefail
+          gh release download "$TAG" \
+            --pattern native-quota-release-candidate.json \
+            --pattern native-quota-release-candidate.sigstore.json \
+            --pattern native-quota-v1.json
+          if [ "$TARGET" = "staging" ] || [ "$TARGET" = "production" ]; then
+            gh release download "$TAG" \
+              --pattern promotion-canary.json \
+              --pattern promotion-canary.sigstore.json
+          fi
+          if [ "$TARGET" = "production" ]; then
+            gh release download "$TAG" \
+              --pattern promotion-staging.json \
+              --pattern promotion-staging.sigstore.json
+          fi
+
+      - name: Verify keyless candidate and image signatures
+        id: metadata
+        env:
+          CANDIDATE_TAG: ${{ steps.inputs.outputs.candidate_tag }}
+          EXPECTED_DIGEST: ${{ steps.inputs.outputs.expected_digest }}
+          TARGET: ${{ steps.inputs.outputs.target }}
+          EVENT_NAME: ${{ github.event_name }}
+          DISPATCH_SHA: ${{ github.event.client_payload.git_sha }}
+          DISPATCH_RELEASE: ${{ github.event.client_payload.release }}
+        run: |
+          set -euo pipefail
+          candidate_identity="^https://github\\.com/${GITHUB_REPOSITORY}/\\.github/workflows/native-quota-candidate\\.yml@refs/heads/(main|releases/sck-[0-9]+\\.[0-9]+)$"
+          promotion_identity="^https://github\\.com/${GITHUB_REPOSITORY}/\\.github/workflows/native-quota-promote\\.yml@refs/heads/(main|releases/sck-[0-9]+\\.[0-9]+)$"
+          issuer="https://token.actions.githubusercontent.com"
+
+          cosign verify-blob \
+            --bundle native-quota-release-candidate.sigstore.json \
+            --certificate-identity-regexp "$candidate_identity" \
+            --certificate-oidc-issuer "$issuer" \
+            native-quota-release-candidate.json
+
+          sha="$(jq -er '.source.git_sha' native-quota-release-candidate.json)"
+          release="$(jq -er '.fork.release' native-quota-release-candidate.json)"
+          image_reference="$(jq -er '.image.reference' native-quota-release-candidate.json)"
+          digest="$(jq -er '.image.digest' native-quota-release-candidate.json)"
+          test "$digest" = "$EXPECTED_DIGEST"
+          python3 scripts/native-quota/release_manifest.py verify \
+            --candidate native-quota-release-candidate.json \
+            --compatibility native-quota-v1.json \
+            --expected-sha "$sha" \
+            --expected-digest "$digest"
+
+          cosign verify \
+            --certificate-identity-regexp "$candidate_identity" \
+            --certificate-oidc-issuer "$issuer" \
+            "$image_reference" > image-signature-verification.json
+
+          if [ "$TARGET" = "staging" ] || [ "$TARGET" = "production" ]; then
+            cosign verify-blob \
+              --bundle promotion-canary.sigstore.json \
+              --certificate-identity-regexp "$promotion_identity" \
+              --certificate-oidc-issuer "$issuer" \
+              promotion-canary.json
+            python3 scripts/native-quota/release_manifest.py verify-receipt \
+              --candidate native-quota-release-candidate.json \
+              --compatibility native-quota-v1.json \
+              --receipt promotion-canary.json \
+              --stage canary \
+              --expected-sha "$sha" \
+              --expected-digest "$digest"
+          fi
+          if [ "$TARGET" = "production" ]; then
+            cosign verify-blob \
+              --bundle promotion-staging.sigstore.json \
+              --certificate-identity-regexp "$promotion_identity" \
+              --certificate-oidc-issuer "$issuer" \
+              promotion-staging.json
+            python3 scripts/native-quota/release_manifest.py verify-receipt \
+              --candidate native-quota-release-candidate.json \
+              --compatibility native-quota-v1.json \
+              --receipt promotion-staging.json \
+              --stage staging \
+              --expected-sha "$sha" \
+              --expected-digest "$digest"
+            test "$EVENT_NAME" = "repository_dispatch"
+            test "$DISPATCH_SHA" = "$sha"
+            test "$DISPATCH_RELEASE" = "$release"
+          fi
+
+          acceptance_run_url=""
+          if [ "$TARGET" = "production" ]; then
+            downstream_repository="$(jq -er '.promotion.downstream_repository' native-quota-release-candidate.json)"
+            downstream_workflow="$(jq -er '.promotion.downstream_acceptance_workflow' native-quota-release-candidate.json)"
+            test "$downstream_repository" = "MainListActivity/surreal_ck"
+            test "$downstream_workflow" = ".github/workflows/native-quota-release-acceptance.yml"
+            downstream_identity="^https://github\\.com/MainListActivity/surreal_ck/\\.github/workflows/native-quota-release-acceptance\\.yml@refs/heads/(main|releases/[^/]+)$"
+            cosign verify-blob \
+              --bundle surreal-ck-acceptance.sigstore.json \
+              --certificate-identity-regexp "$downstream_identity" \
+              --certificate-oidc-issuer "$issuer" \
+              surreal-ck-acceptance.json
+            jq -e \
+              --arg repository "$downstream_repository" \
+              --arg release "$release" \
+              --arg sha "$sha" \
+              --arg digest "$digest" \
+              '.format_version == 1
+               and .decision == "accepted"
+               and .repository == $repository
+               and .candidate.release == $release
+               and .candidate.git_sha == $sha
+               and .candidate.digest == $digest
+               and .gates.contract == "passed"
+               and .gates.e2e == "passed"
+               and .gates.deployment == "passed"
+               and (.run_url | startswith("https://github.com/" + $repository + "/actions/runs/"))' \
+              surreal-ck-acceptance.json >/dev/null
+            acceptance_run_url="$(jq -er '.run_url' surreal-ck-acceptance.json)"
+          fi
+          {
+            echo "target=$TARGET"
+            echo "candidate_tag=$CANDIDATE_TAG"
+            echo "release=$release"
+            echo "git_sha=$sha"
+            echo "digest=$digest"
+            echo "image_reference=$image_reference"
+            echo "acceptance_run_url=$acceptance_run_url"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Transfer verified promotion inputs
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: native-quota-promotion-input
+          path: |
+            native-quota-release-candidate.json
+            native-quota-release-candidate.sigstore.json
+            native-quota-v1.json
+            promotion-*.json
+            promotion-*.sigstore.json
+            surreal-ck-acceptance.json
+            surreal-ck-acceptance.sigstore.json
+            image-signature-verification.json
+          if-no-files-found: ignore
+          retention-days: 90
+
+  promote:
+    name: Promote exact digest to ${{ needs.verify.outputs.target }}
+    needs: verify
+    runs-on: ubuntu-latest
+    environment:
+      name: native-quota-${{ needs.verify.outputs.target }}
+    permissions:
+      contents: write
+      id-token: write
+      packages: read
+    steps:
+      - name: Harden the runner
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout receipt generator
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Download verified inputs
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: native-quota-promotion-input
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
+
+      - name: Log in to fork GHCR namespace
+        uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4.0.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Smoke the exact digest without rebuilding
+        env:
+          IMAGE_REFERENCE: ${{ needs.verify.outputs.image_reference }}
+          RELEASE: ${{ needs.verify.outputs.release }}
+        run: |
+          set -euo pipefail
+          for platform in linux/amd64 linux/arm64; do
+            output="$(docker run --rm --platform "$platform" "$IMAGE_REFERENCE" version)"
+            grep -F "$RELEASE" <<<"$output"
+          done
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v3.0.6
+
+      - name: Refuse to overwrite a promotion receipt
+        id: receipt
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.verify.outputs.candidate_tag }}
+          TARGET: ${{ needs.verify.outputs.target }}
+        run: |
+          set -euo pipefail
+          temporary="$(mktemp -d)"
+          if gh release download "$TAG" --dir "$temporary" \
+            --pattern "promotion-${TARGET}.json" \
+            --pattern "promotion-${TARGET}.sigstore.json" 2>/dev/null; then
+            cp "$temporary/promotion-${TARGET}.json" .
+            cp "$temporary/promotion-${TARGET}.sigstore.json" .
+            identity="^https://github\\.com/${GITHUB_REPOSITORY}/\\.github/workflows/native-quota-promote\\.yml@refs/heads/(main|releases/sck-[0-9]+\\.[0-9]+)$"
+            cosign verify-blob \
+              --bundle "promotion-${TARGET}.sigstore.json" \
+              --certificate-identity-regexp "$identity" \
+              --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+              "promotion-${TARGET}.json"
+            python3 scripts/native-quota/release_manifest.py verify-receipt \
+              --candidate native-quota-release-candidate.json \
+              --compatibility native-quota-v1.json \
+              --receipt "promotion-${TARGET}.json" \
+              --stage "$TARGET" \
+              --expected-sha "${{ needs.verify.outputs.git_sha }}" \
+              --expected-digest "${{ needs.verify.outputs.digest }}"
+            echo "existing=true" >> "$GITHUB_OUTPUT"
+            echo "Reusing verified immutable $TARGET receipt after an interrupted promotion run."
+          else
+            echo "existing=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create and sign digest-only promotion receipt
+        if: steps.receipt.outputs.existing != 'true'
+        env:
+          TARGET: ${{ needs.verify.outputs.target }}
+          SHA: ${{ needs.verify.outputs.git_sha }}
+          DIGEST: ${{ needs.verify.outputs.digest }}
+          ACCEPTANCE_RUN_URL: ${{ needs.verify.outputs.acceptance_run_url }}
+        run: |
+          set -euo pipefail
+          receipt="promotion-${TARGET}.json"
+          python3 scripts/native-quota/release_manifest.py receipt \
+            --candidate native-quota-release-candidate.json \
+            --compatibility native-quota-v1.json \
+            --stage "$TARGET" \
+            --expected-sha "$SHA" \
+            --expected-digest "$DIGEST" \
+            --actor "$GITHUB_ACTOR" \
+            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --downstream-acceptance-run-url "$ACCEPTANCE_RUN_URL" \
+            --output "$receipt"
+          cosign sign-blob --yes --bundle "${receipt%.json}.sigstore.json" "$receipt"
+          python3 scripts/native-quota/release_manifest.py verify-receipt \
+            --candidate native-quota-release-candidate.json \
+            --compatibility native-quota-v1.json \
+            --receipt "$receipt" \
+            --stage "$TARGET" \
+            --expected-sha "$SHA" \
+            --expected-digest "$DIGEST"
+
+      - name: Attach immutable receipt to candidate release
+        if: steps.receipt.outputs.existing != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.verify.outputs.candidate_tag }}
+          TARGET: ${{ needs.verify.outputs.target }}
+        run: >-
+          gh release upload "$TAG"
+          "promotion-${TARGET}.json"
+          "promotion-${TARGET}.sigstore.json"
+
+      - name: Create stable release after downstream production acceptance
+        if: needs.verify.outputs.target == 'production'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE: ${{ needs.verify.outputs.release }}
+          SHA: ${{ needs.verify.outputs.git_sha }}
+          IMAGE_REFERENCE: ${{ needs.verify.outputs.image_reference }}
+          CANDIDATE_TAG: ${{ needs.verify.outputs.candidate_tag }}
+        run: |
+          set -euo pipefail
+          stable_tag="sck-${RELEASE}"
+          if gh release view "$stable_tag" >/dev/null 2>&1; then
+            target="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${stable_tag}" --jq '.target_commitish')"
+            test "$target" = "$SHA" || {
+              echo "::error::stable release $stable_tag targets $target instead of $SHA"
+              exit 1
+            }
+            echo "Verified existing stable release $stable_tag after an interrupted promotion run."
+            exit 0
+          fi
+          gh release create "$stable_tag" \
+            --target "$SHA" \
+            --title "$stable_tag" \
+            --latest=false \
+            --notes "Promoted from $CANDIDATE_TAG after signed surreal_ck acceptance. Production reference: \`$IMAGE_REFERENCE\`. Datastore format downgrade is not supported."
+
+      - name: Upload promotion receipt
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: native-quota-${{ needs.verify.outputs.target }}-${{ needs.verify.outputs.git_sha }}
+          path: |
+            promotion-${{ needs.verify.outputs.target }}.json
+            promotion-${{ needs.verify.outputs.target }}.sigstore.json
+          retention-days: 90

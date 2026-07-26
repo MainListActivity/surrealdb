@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "manifest_revision": "native-quota-v1-dev.2",
+  "manifest_revision": "native-quota-v1.0",
   "fork_id": "mainlistactivity/surrealdb-native-quota",
   "fork_release": "3.3.0-native-quota.1",
   "capabilities": [
@@ -24,7 +24,9 @@
     "requires_exact_release_for_destructive_operations": true
   },
   "sdk": {
-    "surrealdb_js": [],
+    "surrealdb_js": [
+      "2.0.8"
+    ],
     "protocols": [
       "http",
       "ws"
@@ -33,6 +35,44 @@
   "migration": {
     "capability": "native-quota-v1",
     "minimum_cli_release": "3.3.0-native-quota.1"
+  },
+  "release_supply_chain": {
+    "candidate_manifest_format": 1,
+    "image_repository": "ghcr.io/mainlistactivity/surrealdb-native-quota",
+    "nightly_image_repository": "ghcr.io/mainlistactivity/surrealdb-native-quota-nightly",
+    "stable_branch": "releases/sck-3.3",
+    "production_reference": "digest-only",
+    "immutable_tag_kinds": [
+      "release",
+      "git-sha"
+    ],
+    "promotion_environments": [
+      "canary",
+      "staging",
+      "production"
+    ],
+    "required_attestations": [
+      "signature",
+      "spdx-sbom",
+      "slsa-provenance",
+      "vulnerability-report",
+      "surreal-ck-acceptance"
+    ],
+    "downstream_repository": "MainListActivity/surreal_ck",
+    "downstream_acceptance_workflow": ".github/workflows/native-quota-release-acceptance.yml"
+  },
+  "mixed_version": {
+    "policy": "exact-release-only",
+    "compatible_fork_releases": [
+      "3.3.0-native-quota.1"
+    ],
+    "vanilla_binary_allowed": false,
+    "older_fork_binary_allowed": false,
+    "data_format_downgrade_supported": false,
+    "process_rollback_requires_same_release_format": true
+  },
+  "support": {
+    "previous_production_line_days": 90
   },
   "backends": [
     {
@@ -121,6 +161,7 @@
     "org.opencontainers.image.vendor": "MainListActivity",
     "io.mainlistactivity.surrealdb.fork": "mainlistactivity/surrealdb-native-quota",
     "io.mainlistactivity.surrealdb.fork-release": "3.3.0-native-quota.1",
+    "io.mainlistactivity.surrealdb.manifest-revision": "native-quota-v1.0",
     "io.mainlistactivity.surrealdb.quota-contract": "native-quota-v1",
     "io.mainlistactivity.surrealdb.storage-format": "1",
     "io.mainlistactivity.surrealdb.quota-catalog-format": "1",

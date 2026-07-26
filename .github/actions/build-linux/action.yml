@@ -19,6 +19,10 @@ inputs:
     description: 'Build metadata'
     required: false
     default: ''
+  git-sha:
+    description: 'Full source Git SHA embedded in release capability documents'
+    required: false
+    default: ''
   onnx-version:
     description: 'The ONNX library version'
     required: false
@@ -110,6 +114,7 @@ runs:
       env:
         SURREAL_BUILD_VERSION: ${{ inputs.version-override }}
         SURREAL_BUILD_METADATA: ${{ inputs.build-metadata }}
+        SURREAL_BUILD_GIT_SHA: ${{ inputs.git-sha }}
       run: |
         set -x
 
@@ -144,6 +149,9 @@ runs:
           -e "SURREAL_BUILD_METADATA=$SURREAL_BUILD_METADATA"
           -e "ORT_DOWNLOAD_URL=$ORT_DOWNLOAD_URL"
         )
+        if [[ -n "${SURREAL_BUILD_GIT_SHA:-}" ]]; then
+          docker_env+=(-e "SURREAL_BUILD_GIT_SHA=${SURREAL_BUILD_GIT_SHA}")
+        fi
         if [[ -n "${RUSTFLAGS:-}" ]]; then
           docker_env+=(-e "RUSTFLAGS=${RUSTFLAGS}")
         fi
