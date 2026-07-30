@@ -68,10 +68,52 @@ async fn create_consumes_record_quota_and_rejects_the_next_record_atomically() {
 		.remove(0)
 		.result
 		.unwrap();
-	let error = statement_error(&ds, "CREATE ent_user:two", &database_owner).await;
+	let mut responses = ds.execute("CREATE ent_user:two", &database_owner, None).await.unwrap();
+	let error = responses.remove(0).result.unwrap_err();
 
-	assert!(error.contains("user_records"), "{error}");
+	assert_eq!(error.kind_str(), "Quota");
+	let quota = error.quota_details().expect("quota error details must survive commit");
+	assert_eq!(quota.code(), "quota_exceeded");
+	assert!(!quota.retryable());
+	assert!(error.message().contains("user_records"), "{error}");
 	assert_eq!(record_count(&ds, "ent_user").await, 1);
+	assert_eq!(physical_record_count(&ds, "ent_user", &database_owner).await, 1);
+}
+
+#[tokio::test]
+async fn explicit_transaction_commit_preserves_quota_wire_error() {
+	let ds = setup().await;
+	let namespace_owner = Session::owner().with_ns("tenant");
+	let database_owner = Session::owner().with_ns("tenant").with_db("app");
+	ds.execute(
+		"DEFINE QUOTA ON DATABASE app \
+		 RULE user_records FOR RECORD MATCH EXACT ent_user LIMIT 1",
+		&namespace_owner,
+		None,
+	)
+	.await
+	.unwrap()
+	.remove(0)
+	.result
+	.unwrap();
+	ds.execute("CREATE ent_user:one", &database_owner, None)
+		.await
+		.unwrap()
+		.remove(0)
+		.result
+		.unwrap();
+
+	let responses = ds
+		.execute(
+			"BEGIN; CREATE ent_user:two; COMMIT",
+			&database_owner,
+			None,
+		)
+		.await
+		.unwrap();
+	let error = responses.last().expect("COMMIT response").result.as_ref().unwrap_err();
+	assert_eq!(error.kind_str(), "Quota");
+	assert_eq!(error.quota_details().expect("quota details").code(), "quota_exceeded");
 	assert_eq!(physical_record_count(&ds, "ent_user", &database_owner).await, 1);
 }
 

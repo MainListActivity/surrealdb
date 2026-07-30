@@ -1082,6 +1082,9 @@ impl Executor {
 				}
 
 				if let Err(e) = txn.commit().await {
+					if e.downcast_ref::<Error>().is_some_and(Error::is_native_quota) {
+						return Err(e);
+					}
 					bail!(Error::QueryNotExecuted {
 						message: e.to_string(),
 					});
@@ -1504,12 +1507,18 @@ impl Executor {
 						));
 					}
 
+					let commit_error =
+						if e.downcast_ref::<Error>().is_some_and(Error::is_native_quota) {
+							types_error_from_anyhow(e)
+						} else {
+							TypesError::query(
+								format!("Cannot COMMIT: {e}"),
+								Some(QueryError::NotExecuted),
+							)
+						};
 					self.results.push(QueryResult {
 						time: before.elapsed(),
-						result: Err(TypesError::query(
-							format!("Cannot COMMIT: {e}"),
-							Some(QueryError::NotExecuted),
-						)),
+						result: Err(commit_error),
 						query_type: QueryType::Other,
 					});
 

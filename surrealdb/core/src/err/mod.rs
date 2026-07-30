@@ -1470,6 +1470,29 @@ impl Error {
 		)
 	}
 
+	/// Returns true for errors that belong to the native quota wire contract.
+	///
+	/// Quota admission is finalized during transaction commit. Callers which
+	/// normally wrap commit failures as `QueryNotExecuted` use this predicate
+	/// to preserve the structured quota kind/details instead.
+	pub(crate) fn is_native_quota(&self) -> bool {
+		matches!(
+			self,
+			Error::QuotaAlreadyExists { .. }
+				| Error::QuotaNotFound { .. }
+				| Error::QuotaGenerationMismatch { .. }
+				| Error::QuotaGenerationRequired { .. }
+				| Error::QuotaRuleNotFound { .. }
+				| Error::QuotaPolicyInvalid { .. }
+				| Error::QuotaImportNotAllowed
+				| Error::QuotaUsageInvalid { .. }
+				| Error::QuotaUsageNotReady { .. }
+				| Error::QuotaConflict
+				| Error::QuotaPolicyChanged { .. }
+				| Error::QuotaExceeded(_)
+		)
+	}
+
 	/// Returns true if this error represents a data-shape problem
 	/// (type mismatch, coercion failure, etc.) that can be safely
 	/// treated as NONE in expression evaluation contexts.

@@ -114,6 +114,16 @@ Sigstore certificate identity against the exact downstream workflow path
 recorded in the compatibility manifest. A forged dispatch without that keyless
 workflow identity cannot promote.
 
+The downstream workflow may explicitly record
+`waived_no_certificate` for its own duplicate verification of the candidate
+manifest and image signatures. That waiver does not weaken promotion:
+this workflow still verifies the candidate manifest, image, prior receipts, and
+the downstream acceptance statement with GitHub OIDC keyless identities before
+production. Keyless signing and verification do not require a project-owned
+long-lived certificate. Digest, manifest hashes, SBOM, provenance,
+vulnerability, multi-architecture, capability, backend, and E2E gates remain
+mandatory under the downstream waiver.
+
 Production creates the stable GitHub release but creates no production OCI
 tag. Runtime configuration must pin the digest recorded in the production
 receipt. This keeps CI, canary, staging, and production on one signed digest.

@@ -55,3 +55,9 @@ Assignee: /root
 - 2026-07-25：`doc/NATIVE_QUOTA_RELEASES.md` 记录环境配置、双仓 dispatch 契约、
   exact-release-only mixed-version 策略、data format 不可降级和上一 production line
   至少 90 日支持窗口。
+- 2026-07-29：双仓真机验收发现 quota admission 在 implicit commit 失败时被包装为
+  `Query/NotExecuted`；executor 现只对 native quota commit error 保留
+  `Quota` kind/details，并由 RocksDB + surrealdb-js HTTP/WSS E2E 锁定错误保真。
+- 2026-07-29：candidate workflow 原先按源文件模块名过滤宏展开的 backend contracts，
+  会产生 0-test 假绿。门禁现先枚举并要求每个 backend 至少发现 4 个
+  `kvs::tests::<backend>::quota_*` 测试，再按完整生成路径执行。

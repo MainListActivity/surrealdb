@@ -171,9 +171,11 @@ jobs:
         include:
           - backend: memory
             feature: kv-mem
+            module: mem
             runner: runner-arm-16-cores
           - backend: rocksdb
             feature: kv-rocksdb
+            module: rocksdb
             runner: runner-amd-32-cores
     steps:
       - name: Harden the runner
@@ -197,13 +199,36 @@ jobs:
         with:
           preset: test
 
+      - name: Prove backend contract tests are discoverable
+        env:
+          FEATURE: ${{ matrix.feature }}
+          MODULE: ${{ matrix.module }}
+        run: |
+          set -euo pipefail
+          prefix="kvs::tests::${MODULE}::quota_"
+          tests="$(cargo test -p surrealdb-core \
+            --no-default-features \
+            --features "$FEATURE" \
+            --lib \
+            -- --list)"
+          count="$(grep -c "^${prefix}.*: test$" <<<"$tests" || true)"
+          test "$count" -ge 4 || {
+            echo "::error::expected at least four generated quota backend contracts, found $count"
+            exit 1
+          }
+
       - name: Run backend-neutral and persistence contracts
-        run: >-
-          cargo test -p surrealdb-core
-          --no-default-features
-          --features ${{ matrix.feature }}
-          quota_backend_contract
-          -- --test-threads=1
+        env:
+          FEATURE: ${{ matrix.feature }}
+          MODULE: ${{ matrix.module }}
+        run: |
+          set -euo pipefail
+          cargo test -p surrealdb-core \
+            --no-default-features \
+            --features "$FEATURE" \
+            --lib \
+            "kvs::tests::${MODULE}::quota_" \
+            -- --test-threads=1
 
       - name: Run RocksDB crash/restart certification
         if: matrix.backend == 'rocksdb'
