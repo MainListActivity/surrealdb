@@ -35,6 +35,9 @@ pub enum ResourceKind {
 	Sequence,
 	// IAM
 	Actor,
+	// Keep the existing write revision so older ResourceKind variants retain
+	// their frozen wire encoding. Fork-only quota data is protected separately
+	// by the exact-release storage marker.
 	#[revision(start = 5)]
 	Quota,
 }

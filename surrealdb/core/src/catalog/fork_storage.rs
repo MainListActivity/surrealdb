@@ -8,7 +8,11 @@ use crate::kvs::version::MajorVersion;
 
 /// Stable identifier written into datastores that require the native-quota fork.
 pub(crate) const NATIVE_QUOTA_FORK_ID: &str = "mainlistactivity/surrealdb-native-quota";
-/// First fork release line that can read the current protected storage format.
+/// Exact fork release allowed to open the initial protected storage format.
+///
+/// The public field name remains `minimum_compatible_fork_release` for the
+/// frozen revision-1 marker encoding, but compatibility is intentionally exact
+/// until an explicit cross-release migration protocol exists.
 pub(crate) const MINIMUM_COMPATIBLE_FORK_RELEASE: &str = "3.3.0-native-quota.1";
 /// Release identity of this binary for storage compatibility comparisons.
 pub(crate) const CURRENT_FORK_RELEASE: &str = "3.3.0-native-quota.1";
@@ -39,7 +43,7 @@ pub(crate) struct ForkStorageFormat {
 	pub(crate) quota_policy_format_revision: u16,
 	/// Native quota usage catalog format.
 	pub(crate) quota_usage_format_revision: u16,
-	/// Oldest fork release line allowed to open this format.
+	/// Exact fork release allowed to open this format (legacy field name retained).
 	pub(crate) minimum_compatible_fork_release: String,
 	/// Explicit migration state.
 	pub(crate) migration_state: ForkMigrationState,
@@ -76,7 +80,7 @@ impl ForkStorageFormat {
 				),
 			});
 		}
-		let minimum =
+		let required =
 			semver::Version::parse(&self.minimum_compatible_fork_release).map_err(|error| {
 				Error::ForkStorageFormatIncompatible {
 					reason: format!(
@@ -90,10 +94,10 @@ impl ForkStorageFormat {
 				reason: format!("invalid current fork release '{CURRENT_FORK_RELEASE}': {error}"),
 			}
 		})?;
-		if current < minimum {
+		if current != required {
 			bail!(Error::ForkStorageFormatIncompatible {
 				reason: format!(
-					"datastore requires fork release {} but this binary is {}",
+					"datastore requires exact fork release {} but this binary is {}",
 					self.minimum_compatible_fork_release, CURRENT_FORK_RELEASE
 				),
 			});

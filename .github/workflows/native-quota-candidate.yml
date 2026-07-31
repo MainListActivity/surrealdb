@@ -212,8 +212,8 @@ jobs:
             --lib \
             -- --list)"
           count="$(grep -c "^${prefix}.*: test$" <<<"$tests" || true)"
-          test "$count" -ge 4 || {
-            echo "::error::expected at least four generated quota backend contracts, found $count"
+          test "$count" -ge 5 || {
+            echo "::error::expected at least five generated quota backend contracts, found $count"
             exit 1
           }
 

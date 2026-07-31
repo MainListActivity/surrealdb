@@ -404,7 +404,7 @@ fn validate_marker_ceiling(marker: &ForkStorageFormat) -> Result<()> {
 			reason: format!("unsupported upstream storage major {}", marker.upstream_storage_major),
 		});
 	}
-	let minimum =
+	let required =
 		semver::Version::parse(&marker.minimum_compatible_fork_release).map_err(|error| {
 			Error::ForkStorageFormatIncompatible {
 				reason: format!(
@@ -418,10 +418,10 @@ fn validate_marker_ceiling(marker: &ForkStorageFormat) -> Result<()> {
 			reason: format!("invalid current fork release '{CURRENT_FORK_RELEASE}': {error}"),
 		}
 	})?;
-	if current < minimum {
+	if current != required {
 		bail!(Error::ForkStorageFormatIncompatible {
 			reason: format!(
-				"datastore requires fork release {} but this binary is {}",
+				"datastore requires exact fork release {} but this binary is {}",
 				marker.minimum_compatible_fork_release, CURRENT_FORK_RELEASE
 			),
 		});

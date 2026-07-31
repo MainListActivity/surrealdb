@@ -61,3 +61,8 @@ Assignee: /root
 - 2026-07-29：candidate workflow 原先按源文件模块名过滤宏展开的 backend contracts，
   会产生 0-test 假绿。门禁现先枚举并要求每个 backend 至少发现 4 个
   `kvs::tests::<backend>::quota_*` 测试，再按完整生成路径执行。
+- 2026-07-30：首条 protected storage line 收紧为 exact-release-only；marker 的旧字段名
+  为保持 revision-1 编码而保留，但较低或较高 fork release 均 fail-closed。新增
+  `ResourceKind::Quota` 保留在当前 revision 5，并重生成 `revision.lock`：这样既不改变
+  v3.1.1 既有枚举值的 frozen wire header，又由 exact-release storage marker 阻止
+  vanilla 或其它 fork release 解释 fork-only quota 数据。

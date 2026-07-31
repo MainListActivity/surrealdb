@@ -228,9 +228,11 @@ pub async fn multi_node_mixed_contention_contract(new_ds: impl CreateDs) {
 	for client in clients {
 		successes += usize::from(client.await.unwrap());
 	}
-	assert_eq!(successes, LIMIT);
-	assert_eq!(record_count(&primary, "ent_mix").await, LIMIT as u64);
-	assert_eq!(physical_record_count(&primary, "ent_mix").await, LIMIT as i64);
+	let ledger_count = record_count(&primary, "ent_mix").await;
+	let physical_count = physical_record_count(&primary, "ent_mix").await;
+	assert_eq!(successes, LIMIT, "ledger_count={ledger_count}, physical_count={physical_count}");
+	assert_eq!(ledger_count, LIMIT as u64);
+	assert_eq!(physical_count, LIMIT as i64);
 }
 
 async fn execute_in_transaction(
@@ -399,6 +401,78 @@ pub async fn generation_and_rebuild_epoch_contract(new_ds: impl CreateDs) {
 	tx.cancel().await.unwrap();
 }
 
+pub async fn extended_record_semantics_contract(new_ds: impl CreateDs) {
+	let ds = setup(new_ds, Uuid::new_v4()).await;
+	let ns_owner = namespace_owner();
+	let db_owner = database_owner();
+	statement_result(
+		&ds,
+		"DEFINE QUOTA ON DATABASE app \
+		 RULE edge_records FOR RECORD MATCH EXACT ent_edge LIMIT 1 \
+		 RULE view_records FOR RECORD MATCH EXACT ent_view LIMIT 1 \
+		 RULE import_records FOR RECORD MATCH EXACT ent_import LIMIT 1 \
+		 RULE range_records FOR RECORD MATCH EXACT ent_range LIMIT 5",
+		&ns_owner,
+	)
+	.await
+	.unwrap();
+
+	statement_result(
+		&ds,
+		"CREATE ent_node:a; CREATE ent_node:b; CREATE ent_node:c; \
+		 RELATE ent_node:a -> ent_edge:one -> ent_node:b SET weight = 1",
+		&db_owner,
+	)
+	.await
+	.unwrap();
+	let edge_error =
+		statement_error(&ds, "RELATE ent_node:a -> ent_edge:two -> ent_node:c", &db_owner).await;
+	assert!(edge_error.contains("edge_records"), "{edge_error}");
+	statement_result(&ds, "DELETE ent_node:a", &db_owner).await.unwrap();
+	assert_eq!(record_count(&ds, "ent_edge").await, 0);
+	statement_result(&ds, "RELATE ent_node:b -> ent_edge:two -> ent_node:c", &db_owner)
+		.await
+		.unwrap();
+	assert_eq!(record_count(&ds, "ent_edge").await, 1);
+
+	statement_result(
+		&ds,
+		"CREATE ent_source:one SET score = 1; \
+		 DEFINE TABLE ent_view AS SELECT score FROM ent_source",
+		&db_owner,
+	)
+	.await
+	.unwrap();
+	assert_eq!(record_count(&ds, "ent_view").await, 1);
+	let view_error = statement_error(&ds, "CREATE ent_source:two SET score = 2", &db_owner).await;
+	assert!(view_error.contains("view_records"), "{view_error}");
+	assert_eq!(physical_record_count(&ds, "ent_source").await, 1);
+
+	let responses = ds
+		.import(
+			"OPTION IMPORT; \
+			 INSERT INTO ent_import { id: ent_import:one, score: 1 }; \
+			 INSERT INTO ent_import { id: ent_import:two, score: 2 };",
+			&db_owner,
+		)
+		.await
+		.unwrap();
+	let import_errors =
+		responses.into_iter().filter_map(|response| response.result.err()).collect::<Vec<_>>();
+	assert_eq!(import_errors.len(), 1);
+	assert!(import_errors[0].to_string().contains("import_records"));
+	assert_eq!(record_count(&ds, "ent_import").await, 1);
+	assert_eq!(physical_record_count(&ds, "ent_import").await, 1);
+
+	statement_result(&ds, "CREATE |ent_range:1..=5|", &db_owner).await.unwrap();
+	assert_eq!(record_count(&ds, "ent_range").await, 5);
+	statement_result(&ds, "DELETE |ent_range:2..=4|", &db_owner).await.unwrap();
+	assert_eq!(record_count(&ds, "ent_range").await, 2);
+	statement_result(&ds, "CREATE |ent_range:6..=8|", &db_owner).await.unwrap();
+	assert_eq!(record_count(&ds, "ent_range").await, 5);
+	assert_eq!(physical_record_count(&ds, "ent_range").await, 5);
+}
+
 macro_rules! define_tests {
 	($new_ds:ident) => {
 		#[tokio::test]
@@ -419,6 +493,11 @@ macro_rules! define_tests {
 		#[tokio::test]
 		async fn quota_generation_and_rebuild_epoch_contract() {
 			super::quota_backend_contract::generation_and_rebuild_epoch_contract($new_ds).await;
+		}
+
+		#[tokio::test]
+		async fn quota_extended_record_semantics_contract() {
+			super::quota_backend_contract::extended_record_semantics_contract($new_ds).await;
 		}
 	};
 }

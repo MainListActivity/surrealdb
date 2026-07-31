@@ -83,7 +83,7 @@ async fn unknown_newer_quota_format_fails_closed() {
 }
 
 #[tokio::test]
-async fn older_known_format_requires_migration_and_release_range_is_ordered() {
+async fn older_known_format_requires_migration_and_release_must_match_exactly() {
 	let ds = Datastore::new("memory").await.unwrap();
 	let mut marker = ForkStorageFormat::current();
 	marker.quota_usage_format_revision = 0;
@@ -98,7 +98,11 @@ async fn older_known_format_requires_migration_and_release_range_is_ordered() {
 	let mut marker = ForkStorageFormat::current();
 	marker.minimum_compatible_fork_release = "3.3.0-native-quota.0".to_owned();
 	write_format(&ds, MajorVersion::latest(), Some(marker)).await;
-	ds.check_version().await.unwrap();
+	let error = ds.check_version().await.unwrap_err();
+	assert!(
+		matches!(error.downcast_ref::<Error>(), Some(Error::ForkStorageFormatIncompatible { .. })),
+		"{error}"
+	);
 
 	let ds = Datastore::new("memory").await.unwrap();
 	let mut marker = ForkStorageFormat::current();

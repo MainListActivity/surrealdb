@@ -2,14 +2,16 @@
 
 mod cnf;
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 pub use cnf::MemoryConfig;
 use surrealmx::{Database, DatabaseOptions, KeyIterator, ScanIterator, Transaction as Tx};
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 use tracing::info;
 
 const TARGET: &str = "surrealdb::core::kvs::mem";
@@ -32,7 +34,10 @@ use crate::kvs::timestamp::{
 use crate::kvs::{Key, Val};
 
 pub struct Datastore {
-	db: Database,
+	db: Arc<Database>,
+	/// Makes commit-time conditional validation atomic with the following
+	/// SurrealMX commit.
+	commit_lock: Arc<Mutex<()>>,
 	/// Whether user-defined timestamps (versioning) are enabled
 	versioned: bool,
 }
@@ -44,8 +49,54 @@ pub struct Transaction {
 	write: bool,
 	/// The underlying datastore transaction
 	inner: RwLock<Tx>,
+	/// Handle used to validate conditional writes against the latest committed
+	/// state instead of this transaction's older snapshot.
+	db: Arc<Database>,
+	/// Shared by every transaction from the same in-memory backend, including
+	/// test-only datastore facades.
+	commit_lock: Arc<Mutex<()>>,
+	/// Base-value preconditions that must still hold at commit time.
+	commit_validation: Mutex<CommitValidationState>,
 	/// Copied from the datastore at transaction creation.
 	versioned: bool,
+}
+
+#[derive(Clone, Debug, Default)]
+struct CommitValidationSnapshot {
+	mutated: BTreeSet<Key>,
+	conditions: BTreeMap<Key, Option<Val>>,
+}
+
+#[derive(Debug, Default)]
+struct CommitValidationState {
+	current: CommitValidationSnapshot,
+	savepoints: Vec<CommitValidationSnapshot>,
+}
+
+impl CommitValidationState {
+	fn register_unconditional(&mut self, key: Key) {
+		self.current.mutated.insert(key);
+	}
+
+	fn register_conditional(&mut self, key: Key, expected: Option<Val>) {
+		if self.current.mutated.insert(key.clone()) {
+			self.current.conditions.insert(key, expected);
+		}
+	}
+
+	fn new_save_point(&mut self) {
+		self.savepoints.push(self.current.clone());
+	}
+
+	fn rollback_to_save_point(&mut self) {
+		if let Some(snapshot) = self.savepoints.pop() {
+			self.current = snapshot;
+		}
+	}
+
+	fn release_last_save_point(&mut self) {
+		self.savepoints.pop();
+	}
 }
 
 impl Transaction {
@@ -121,7 +172,8 @@ impl Datastore {
 		};
 		// Return the new datastore
 		Ok(Datastore {
-			db,
+			db: Arc::new(db),
+			commit_lock: Arc::new(Mutex::new(())),
 			versioned: config.versioned,
 		})
 	}
@@ -141,6 +193,9 @@ impl Datastore {
 			done: AtomicBool::new(false),
 			write,
 			inner: RwLock::new(txn),
+			db: Arc::clone(&self.db),
+			commit_lock: Arc::clone(&self.commit_lock),
+			commit_validation: Mutex::new(CommitValidationState::default()),
 			versioned: self.versioned,
 		}))
 	}
@@ -189,6 +244,27 @@ impl Transactable for Transaction {
 			// Check to see if transaction is writable
 			if !self.writeable() {
 				return Err(Error::TransactionReadonly);
+			}
+			// Keep latest-value validation and the following commit indivisible
+			// with respect to every other in-memory committer.
+			let _commit_guard = self.commit_lock.lock().await;
+			let conditions = self.commit_validation.lock().await.current.conditions.clone();
+			if !conditions.is_empty() {
+				let mut latest = self.db.transaction(false).with_snapshot_isolation();
+				for (key, expected) in conditions {
+					let actual = latest.get(&key)?;
+					let matches = match (actual.as_deref(), expected.as_deref()) {
+						(Some(actual), Some(expected)) => actual == expected,
+						(None, None) => true,
+						_ => false,
+					};
+					if !matches {
+						latest.cancel()?;
+						self.inner.write().await.cancel()?;
+						return Err(Error::TransactionConditionNotMet);
+					}
+				}
+				latest.cancel()?;
 			}
 			// Load the inner transaction
 			let mut inner = self.inner.write().await;
@@ -293,8 +369,10 @@ impl Transactable for Transaction {
 			}
 			// Load the inner transaction
 			let mut inner = self.inner.write().await;
+			let validation_key = key.clone();
 			// Set the key
 			inner.set(key, val)?;
+			self.commit_validation.lock().await.register_unconditional(validation_key);
 			// Return result
 			Ok(())
 		})
@@ -314,8 +392,10 @@ impl Transactable for Transaction {
 			}
 			// Load the inner transaction
 			let mut inner = self.inner.write().await;
+			let validation_key = key.clone();
 			// Replace the key
 			inner.set(key, val)?;
+			self.commit_validation.lock().await.register_unconditional(validation_key);
 			// Return result
 			Ok(())
 		})
@@ -335,8 +415,10 @@ impl Transactable for Transaction {
 			}
 			// Load the inner transaction
 			let mut inner = self.inner.write().await;
+			let validation_key = key.clone();
 			// Set the key if empty
 			inner.put(key, val)?;
+			self.commit_validation.lock().await.register_conditional(validation_key, None);
 			// Return result
 			Ok(())
 		})
@@ -356,12 +438,15 @@ impl Transactable for Transaction {
 			}
 			// Load the inner transaction
 			let mut inner = self.inner.write().await;
+			let validation_key = key.clone();
+			let expected = chk.clone();
 			// Set the key if valid
 			match (inner.get(&key)?, chk) {
 				(Some(v), Some(w)) if v == w => inner.set(key, val)?,
 				(None, None) => inner.set(key, val)?,
 				_ => return Err(Error::TransactionConditionNotMet),
 			};
+			self.commit_validation.lock().await.register_conditional(validation_key, expected);
 			// Return result
 			Ok(())
 		})
@@ -381,8 +466,10 @@ impl Transactable for Transaction {
 			}
 			// Load the inner transaction
 			let mut inner = self.inner.write().await;
+			let validation_key = key.clone();
 			// Remove the key
 			inner.del(key)?;
+			self.commit_validation.lock().await.register_unconditional(validation_key);
 			// Return result
 			Ok(())
 		})
@@ -402,12 +489,15 @@ impl Transactable for Transaction {
 			}
 			// Load the inner transaction
 			let mut inner = self.inner.write().await;
+			let validation_key = key.clone();
+			let expected = chk.clone();
 			// Delete the key if valid
 			match (inner.get(&key)?, chk) {
 				(Some(v), Some(w)) if v == w => inner.del(key)?,
 				(None, None) => inner.del(key)?,
 				_ => return Err(Error::TransactionConditionNotMet),
 			};
+			self.commit_validation.lock().await.register_conditional(validation_key, expected);
 			// Return result
 			Ok(())
 		})
@@ -427,8 +517,10 @@ impl Transactable for Transaction {
 			}
 			// Load the inner transaction
 			let mut inner = self.inner.write().await;
+			let validation_key = key.clone();
 			// Remove the key (use del since delete doesn't exist in SurrealMX)
 			inner.del(key)?;
+			self.commit_validation.lock().await.register_unconditional(validation_key);
 			// Return result
 			Ok(())
 		})
@@ -448,12 +540,15 @@ impl Transactable for Transaction {
 			}
 			// Load the inner transaction
 			let mut inner = self.inner.write().await;
+			let validation_key = key.clone();
+			let expected = chk.clone();
 			// Delete the key if valid
 			match (inner.get(&key)?, chk) {
 				(Some(v), Some(w)) if v == w => inner.del(key)?,
 				(None, None) => inner.del(key)?,
 				_ => return Err(Error::TransactionConditionNotMet),
 			};
+			self.commit_validation.lock().await.register_conditional(validation_key, expected);
 			// Return result
 			Ok(())
 		})
@@ -643,6 +738,7 @@ impl Transactable for Transaction {
 	fn new_save_point(&self) -> BoxFut<'_, Result<()>> {
 		Box::pin(async move {
 			self.inner.write().await.set_savepoint()?;
+			self.commit_validation.lock().await.new_save_point();
 			Ok(())
 		})
 	}
@@ -651,13 +747,17 @@ impl Transactable for Transaction {
 	fn rollback_to_save_point(&self) -> BoxFut<'_, Result<()>> {
 		Box::pin(async move {
 			self.inner.write().await.rollback_to_savepoint()?;
+			self.commit_validation.lock().await.rollback_to_save_point();
 			Ok(())
 		})
 	}
 
 	/// Release the last save point.
 	fn release_last_save_point(&self) -> BoxFut<'_, Result<()>> {
-		Box::pin(async move { Ok(()) })
+		Box::pin(async move {
+			self.commit_validation.lock().await.release_last_save_point();
+			Ok(())
+		})
 	}
 
 	fn timestamp_impl(&self) -> BoxTimeStampImpl {

@@ -50,3 +50,13 @@ Assignee: /root
   `compatibility/native-quota-rocksdb-v1.json` 基线，覆盖无策略计量、有限策略、
   regex 多匹配和 16-record batch；报告吞吐、p95/p99、KV 写/字节放大和存储增长，
   manifest 明示 baseline/candidate 命令及五类回归阈值。
+- 2026-07-30：最终双仓复审把 backend-neutral 合约扩展为 5 项；memory 与 RocksDB
+  同时认证 RELATE/级联释放、materialized view 派生写、semantic import 语句边界和
+  record range 实际基数。candidate discovery 门同步要求至少发现 5 项，防止新增语义
+  仅在 memory 单测通过却被错误标记为持久后端已认证。
+- 2026-07-30：最终压力复审在 memory backend 稳定复现提交期条件写丢失：两个并发
+  事务可基于同一 quota usage 旧值完成投影并同时提交。memory backend 现于共享短
+  临界区内，按最新已提交值复核条件写后再提交；原双节点 mixed
+  CREATE/INSERT/UPSERT 压测连续 100 轮无越额。回归结果为 memory KVS 34/34、
+  memory quota backend 5/5、RocksDB quota backend 5/5。memory 仍仅用于开发与 CI，
+  生产候选继续使用 RocksDB。
