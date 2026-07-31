@@ -233,10 +233,12 @@ pub(crate) mod testing {
 		Err(super::Error::Internal(format!("injected non-retryable error at {site:?}")).into())
 	}
 
+	#[cfg_attr(not(any(feature = "kv-mem", feature = "kv-rocksdb")), allow(dead_code))]
 	pub(crate) fn inject_quota_fault(site: QuotaFaultSite, node_id: Uuid) -> QuotaFaultGuard {
 		inject_quota_faults(site, node_id, 1)
 	}
 
+	#[cfg_attr(not(any(feature = "kv-mem", feature = "kv-rocksdb")), allow(dead_code))]
 	pub(crate) fn inject_quota_faults(
 		site: QuotaFaultSite,
 		node_id: Uuid,
@@ -285,6 +287,7 @@ pub(crate) mod testing {
 		}
 	}
 
+	#[cfg_attr(not(any(feature = "kv-mem", feature = "kv-rocksdb")), allow(dead_code))]
 	pub(crate) struct QuotaFaultGuard {
 		site: QuotaFaultSite,
 		node_id: Uuid,

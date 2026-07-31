@@ -27,6 +27,7 @@ mod multireader;
 mod multiwriter_different_keys;
 mod multiwriter_same_keys_allow;
 mod multiwriter_same_keys_conflict;
+#[cfg(any(feature = "kv-mem", feature = "kv-rocksdb"))]
 mod quota_backend_contract;
 #[cfg(feature = "kv-mem")]
 mod quota_info_test;

@@ -3,13 +3,13 @@
 reason = "Database quota policies enforce singleton creation, optimistic generation guards, canonical no-op updates, and guarded removal."
 
 [[test.results]]
-value = "NONE"
+match = "$result.operation = 'define_quota' AND $result.changed = true AND $result.after.generation = 1"
 
 [[test.results]]
 error = "The quota policy for database 'test' already exists"
 
 [[test.results]]
-value = "NONE"
+match = "$result.operation = 'define_quota' AND $result.changed = false AND $result.after.generation = 1"
 
 [[test.results]]
 error = "The quota policy for database 'test' requires `EXPECT GENERATION`"
@@ -18,28 +18,28 @@ error = "The quota policy for database 'test' requires `EXPECT GENERATION`"
 error = "The quota policy for database 'test' has generation 1, expected 9"
 
 [[test.results]]
-value = "NONE"
+match = "$result.operation = 'define_quota' AND $result.changed = false AND $result.after.generation = 1"
 
 [[test.results]]
-value = "NONE"
+match = "$result.operation = 'alter_quota' AND $result.changed = false AND $result.after.generation = 1"
 
 [[test.results]]
-value = "NONE"
+match = "$result.operation = 'alter_quota' AND $result.changed = true AND $result.after.generation = 2"
 
 [[test.results]]
 error = "The quota policy for database 'test' has generation 2, expected 1"
 
 [[test.results]]
-value = "NONE"
+match = "$result.operation = 'remove_quota' AND $result.changed = true AND $result.after.generation = 3"
 
 [[test.results]]
-value = "NONE"
+match = "$result.operation = 'remove_quota' AND $result.changed = false AND $result.after.generation = 3"
 
 [[test.results]]
 error = "The quota policy for database 'test' does not exist"
 
 [[test.results]]
-value = "NONE"
+match = "$result.operation = 'define_quota' AND $result.changed = true AND $result.after.generation = 4"
 
 [[test.results]]
 error = "The quota policy for database 'test' has generation 4, expected 2"

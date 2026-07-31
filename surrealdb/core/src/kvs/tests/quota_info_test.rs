@@ -111,6 +111,31 @@ async fn info_for_quota_returns_canonical_text_and_stable_ready_structure() {
 }
 
 #[tokio::test]
+async fn database_info_hides_zero_generation_without_quota_policy() {
+	let ds = Datastore::new("memory").await.unwrap();
+	let root = Session::owner();
+	let namespace_owner = Session::owner().with_ns("tenant");
+	let database_owner =
+		Session::for_level(Level::Database("tenant".into(), "app".into()), Role::Owner);
+	ds.execute("DEFINE NAMESPACE tenant", &root, None).await.unwrap();
+	ds.execute("DEFINE DATABASE app", &namespace_owner, None).await.unwrap();
+
+	// Ordinary metered DDL initializes the generation high-water key to zero,
+	// but zero is an implementation sentinel rather than a policy generation.
+	ds.execute("DEFINE TABLE user", &database_owner, None).await.unwrap();
+
+	let database_info = query_value(&ds, "INFO FOR DATABASE STRUCTURE", &database_owner).await;
+	let Value::Object(database_info) = database_info else {
+		panic!("expected database info object");
+	};
+	let Value::Object(quota) = database_info.get("quota").unwrap() else {
+		panic!("expected lightweight quota summary");
+	};
+	assert_eq!(quota.get("defined").unwrap().to_sql(), "false");
+	assert_eq!(quota.get("generation"), Some(&Value::None));
+}
+
+#[tokio::test]
 async fn database_owner_can_read_quota_but_untrusted_usage_is_hidden() {
 	let ds = Datastore::new("memory").await.unwrap();
 	let root = Session::owner();

@@ -5,7 +5,7 @@
 value = "NONE"
 
 [[test.results]]
-value = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: { test: 'DEFINE PARAM $test VALUE 12345 PERMISSIONS FULL' }, sequences: {  }, tables: {  }, users: {  } }"
+value = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: { test: 'DEFINE PARAM $test VALUE 12345 PERMISSIONS FULL' }, quota: { defined: false, generation: NONE }, sequences: {  }, tables: {  }, users: {  } }"
 
 [[test.results]]
 value = "[12345]"
