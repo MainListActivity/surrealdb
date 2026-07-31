@@ -56,11 +56,11 @@ jobs:
         include:
           - name: amd64
             target: x86_64-unknown-linux-gnu
-            runner: runner-amd-32-cores
+            runner: ${{ github.repository == 'surrealdb/surrealdb' && 'runner-amd-32-cores' || 'ubuntu-24.04' }}
           - name: arm64
             target: aarch64-unknown-linux-gnu
             # amd64 leg stays on-demand (no amd spot pool); arm builds spot on PRs.
-            runner: runner-arm-32-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+            runner: ${{ github.repository == 'surrealdb/surrealdb' && format('runner-arm-32-cores{0}', github.event_name == 'pull_request' && '-spot' || '') || 'ubuntu-24.04-arm' }}
     env:
       SCCACHE_LOG: ${{ (github.event_name == 'push' || github.event_name == 'merge_group') && 'debug' || '' }}
       SCCACHE_ERROR_LOG: ${{ (github.event_name == 'push' || github.event_name == 'merge_group') && '/tmp/sccache.log' || '' }}
@@ -100,7 +100,7 @@ jobs:
 
   format:
     name: Check format
-    runs-on: runner-arm-4-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: ${{ github.repository == 'surrealdb/surrealdb' && format('runner-arm-4-cores{0}', github.event_name == 'pull_request' && '-spot' || '') || 'ubuntu-24.04-arm' }}
     steps:
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -127,7 +127,7 @@ jobs:
 
   clippy:
     name: Check clippy (debug)
-    runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: ${{ github.repository == 'surrealdb/surrealdb' && format('runner-arm-16-cores{0}', github.event_name == 'pull_request' && '-spot' || '') || 'ubuntu-24.04-arm' }}
     steps:
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -147,7 +147,7 @@ jobs:
   clippy-release:
     name: Check clippy (release)
     if: github.ref == 'refs/heads/main'
-    runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: ${{ github.repository == 'surrealdb/surrealdb' && format('runner-arm-16-cores{0}', github.event_name == 'pull_request' && '-spot' || '') || 'ubuntu-24.04-arm' }}
     steps:
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -166,7 +166,7 @@ jobs:
 
   check-debug:
     name: Check workspace (debug)
-    runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: ${{ github.repository == 'surrealdb/surrealdb' && format('runner-arm-16-cores{0}', github.event_name == 'pull_request' && '-spot' || '') || 'ubuntu-24.04-arm' }}
     steps:
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -185,7 +185,7 @@ jobs:
   check-release:
     name: Check workspace (release)
     if: github.event_name == 'push' || github.event_name == 'merge_group'
-    runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: ${{ github.repository == 'surrealdb/surrealdb' && format('runner-arm-16-cores{0}', github.event_name == 'pull_request' && '-spot' || '') || 'ubuntu-24.04-arm' }}
     steps:
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -203,7 +203,7 @@ jobs:
 
   check-msrv:
     name: Check workspace (MSRV)
-    runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: ${{ github.repository == 'surrealdb/surrealdb' && format('runner-arm-16-cores{0}', github.event_name == 'pull_request' && '-spot' || '') || 'ubuntu-24.04-arm' }}
     env:
       msrv: "1.95" # This should be updated if the MSRV is updated.
     steps:
@@ -224,7 +224,7 @@ jobs:
 
   check-wasm:
     name: Check Wasm
-    runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: ${{ github.repository == 'surrealdb/surrealdb' && format('runner-arm-16-cores{0}', github.event_name == 'pull_request' && '-spot' || '') || 'ubuntu-24.04-arm' }}
     steps:
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -243,7 +243,7 @@ jobs:
 
   check-revision:
     name: Check revision
-    runs-on: runner-arm-4-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: ${{ github.repository == 'surrealdb/surrealdb' && format('runner-arm-4-cores{0}', github.event_name == 'pull_request' && '-spot' || '') || 'ubuntu-24.04-arm' }}
     steps:
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -262,7 +262,7 @@ jobs:
 
   check-docs:
     name: Check docs
-    runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: ${{ github.repository == 'surrealdb/surrealdb' && format('runner-arm-16-cores{0}', github.event_name == 'pull_request' && '-spot' || '') || 'ubuntu-24.04-arm' }}
     steps:
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -280,7 +280,7 @@ jobs:
 
   feature-check:
     name: Check feature combinations
-    runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: ${{ github.repository == 'surrealdb/surrealdb' && format('runner-arm-16-cores{0}', github.event_name == 'pull_request' && '-spot' || '') || 'ubuntu-24.04-arm' }}
     if: github.ref == 'refs/heads/main'
     steps:
       - name: Checkout sources
@@ -303,7 +303,7 @@ jobs:
 
   unused-deps:
     name: Check unused dependencies
-    runs-on: runner-arm-4-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: ${{ github.repository == 'surrealdb/surrealdb' && format('runner-arm-4-cores{0}', github.event_name == 'pull_request' && '-spot' || '') || 'ubuntu-24.04-arm' }}
     steps:
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -329,7 +329,7 @@ jobs:
 
   integration-tests:
     name: Integration tests (${{ matrix.arch }})
-    runs-on: runner-${{ matrix.arch }}-32-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: ${{ github.repository == 'surrealdb/surrealdb' && format('runner-{0}-32-cores{1}', matrix.arch, github.event_name == 'pull_request' && '-spot' || '') || (matrix.arch == 'arm' && 'ubuntu-24.04-arm' || 'ubuntu-24.04') }}
     strategy:
       fail-fast: false
       matrix:
@@ -363,7 +363,7 @@ jobs:
   test:
     name: Test workspace (${{ matrix.arch }})
     # ARM on every trigger; amd64 added only on merge-queue and push to main.
-    runs-on: runner-${{ matrix.arch }}-32-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: ${{ github.repository == 'surrealdb/surrealdb' && format('runner-{0}-32-cores{1}', matrix.arch, github.event_name == 'pull_request' && '-spot' || '') || (matrix.arch == 'arm' && 'ubuntu-24.04-arm' || 'ubuntu-24.04') }}
     strategy:
       fail-fast: false
       matrix:
@@ -383,7 +383,7 @@ jobs:
 
   kvs-engines:
     name: KVS - ${{ matrix.engine }} engine (${{ matrix.arch }})
-    runs-on: runner-${{ matrix.arch }}-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: ${{ github.repository == 'surrealdb/surrealdb' && format('runner-{0}-16-cores{1}', matrix.arch, github.event_name == 'pull_request' && '-spot' || '') || (matrix.arch == 'arm' && 'ubuntu-24.04-arm' || 'ubuntu-24.04') }}
     strategy:
       fail-fast: false
       matrix:
@@ -418,7 +418,7 @@ jobs:
 
   sdk-build:
     name: Test SDK build
-    runs-on: runner-arm-4-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: ${{ github.repository == 'surrealdb/surrealdb' && format('runner-arm-4-cores{0}', github.event_name == 'pull_request' && '-spot' || '') || 'ubuntu-24.04-arm' }}
     steps:
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -438,7 +438,7 @@ jobs:
 
   sdk-engines:
     name: Rust SDK - ${{ matrix.engine }} engine
-    runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: ${{ github.repository == 'surrealdb/surrealdb' && format('runner-arm-16-cores{0}', github.event_name == 'pull_request' && '-spot' || '') || 'ubuntu-24.04-arm' }}
     strategy:
       fail-fast: false
       matrix:
@@ -473,7 +473,7 @@ jobs:
 
   lang-tests:
     name: SurrealQL tests - ${{ matrix.engine }} (${{ matrix.arch }})
-    runs-on: runner-${{ matrix.arch }}-32-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: ${{ github.repository == 'surrealdb/surrealdb' && format('runner-{0}-32-cores{1}', matrix.arch, github.event_name == 'pull_request' && '-spot' || '') || (matrix.arch == 'arm' && 'ubuntu-24.04-arm' || 'ubuntu-24.04') }}
     strategy:
       fail-fast: false
       matrix:
@@ -528,7 +528,7 @@ jobs:
 
   lang-upgrade-tests:
     name: SurrealQL upgrade tests - ${{ matrix.engine }} (${{ matrix.arch }})
-    runs-on: runner-${{ matrix.arch }}-32-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: ${{ github.repository == 'surrealdb/surrealdb' && format('runner-{0}-32-cores{1}', matrix.arch, github.event_name == 'pull_request' && '-spot' || '') || (matrix.arch == 'arm' && 'ubuntu-24.04-arm' || 'ubuntu-24.04') }}
     strategy:
       fail-fast: false
       matrix:
@@ -586,7 +586,7 @@ jobs:
 
   check-tokio-console:
     name: Check tokio-console feature
-    runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    runs-on: ${{ github.repository == 'surrealdb/surrealdb' && format('runner-arm-16-cores{0}', github.event_name == 'pull_request' && '-spot' || '') || 'ubuntu-24.04-arm' }}
     env:
       RUSTFLAGS: -D warnings --cfg tokio_unstable
     steps:
