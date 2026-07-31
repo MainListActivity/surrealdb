@@ -120,7 +120,7 @@ jobs:
   contract-gates:
     name: Capability, formats, and release contracts
     needs: source-gate
-    runs-on: runner-arm-16-cores
+    runs-on: ${{ github.repository == 'surrealdb/surrealdb' && 'runner-arm-16-cores' || 'ubuntu-24.04-arm' }}
     permissions:
       contents: read
     steps:
@@ -172,11 +172,11 @@ jobs:
           - backend: memory
             feature: kv-mem
             module: mem
-            runner: runner-arm-16-cores
+            runner: ${{ github.repository == 'surrealdb/surrealdb' && 'runner-arm-16-cores' || 'ubuntu-24.04-arm' }}
           - backend: rocksdb
             feature: kv-rocksdb
             module: rocksdb
-            runner: runner-amd-32-cores
+            runner: ${{ github.repository == 'surrealdb/surrealdb' && 'runner-amd-32-cores' || 'ubuntu-24.04' }}
     steps:
       - name: Harden the runner
         uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
@@ -291,10 +291,10 @@ jobs:
         include:
           - arch: x86_64-unknown-linux-gnu
             platform: amd64
-            runner: runner-amd-32-cores
+            runner: ${{ github.repository == 'surrealdb/surrealdb' && 'runner-amd-32-cores' || 'ubuntu-24.04' }}
           - arch: aarch64-unknown-linux-gnu
             platform: arm64
-            runner: runner-arm-32-cores
+            runner: ${{ github.repository == 'surrealdb/surrealdb' && 'runner-arm-32-cores' || 'ubuntu-24.04-arm' }}
     steps:
       - name: Harden the runner
         uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
