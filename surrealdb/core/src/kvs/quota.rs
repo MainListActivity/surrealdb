@@ -9,7 +9,7 @@ use super::Transaction;
 use crate::catalog::providers::{DatabaseProvider, TableProvider};
 use crate::catalog::{
 	DatabaseId, NamespaceId, QuotaLimit, QuotaPolicyDefinition, QuotaResource, QuotaSelector,
-	QuotaUsageMeta, QuotaUsageState, TableDefinition,
+	QuotaUsageMeta, QuotaUsageState, TableDefinition, TableType,
 };
 use crate::err::{Error, QuotaExceededError, QuotaViolation};
 use crate::key::database::qg::Qg;
@@ -402,13 +402,21 @@ impl Transaction {
 
 		for table in tables.iter() {
 			let fields = self.all_tb_fields(ns, db, &table.name, None).await?;
-			let field_count =
-				u64::try_from(fields.len()).map_err(|_| Error::QuotaUsageInvalid {
-					reason: format!(
-						"field catalog size for table '{}' does not fit in rebuild counter",
-						table.name
-					),
-				})?;
+			let field_count = u64::try_from(
+				fields
+					.iter()
+					.filter(|field| {
+						!matches!(&table.table_type, TableType::Relation(_))
+							|| !matches!(field.name.to_raw_string().as_str(), "in" | "out")
+					})
+					.count(),
+			)
+			.map_err(|_| Error::QuotaUsageInvalid {
+				reason: format!(
+					"field catalog size for table '{}' does not fit in rebuild counter",
+					table.name
+				),
+			})?;
 			scan.fields =
 				scan.fields.checked_add(field_count).ok_or_else(|| Error::QuotaUsageInvalid {
 					reason: "quota rebuild field scan count overflow".to_owned(),

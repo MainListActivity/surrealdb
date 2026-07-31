@@ -49,6 +49,7 @@ mod reclaim_test;
 mod snapshot;
 #[cfg(feature = "kv-mem")]
 mod storage_format_test;
+#[cfg(feature = "kv-mem")]
 mod storage_migration_test;
 #[cfg(feature = "kv-mem")]
 mod tx_cache_test;

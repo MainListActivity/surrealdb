@@ -2,8 +2,8 @@ use anyhow::Result;
 use reblessive::tree::Stk;
 use uuid::Uuid;
 
-use crate::catalog::TableDefinition;
 use crate::catalog::providers::TableProvider;
+use crate::catalog::{TableDefinition, TableType};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -68,9 +68,19 @@ impl RemoveFieldStatement {
 				}
 			}
 		};
+		let Some(tb) = txn.get_tb(ns, db, &table_name, None).await? else {
+			return Err(Error::TbNotFound {
+				name: table_name,
+			}
+			.into());
+		};
 		// Delete the definition
 		let key = crate::key::table::fd::new(ns, db, &table_name, &name);
-		txn.quota_usage(ns, db).register_field_delta(&table_name, -1).await?;
+		let implicit_relation_field = matches!(&tb.table_type, TableType::Relation(_))
+			&& matches!(name.as_str(), "in" | "out");
+		if !implicit_relation_field {
+			txn.quota_usage(ns, db).register_field_delta(&table_name, -1).await?;
+		}
 		txn.del(&key).await?;
 		// If the removed field declared a REFERENCE, purge the reference keys it
 		// wrote. Those keys live under the referenced (target) record's range,
@@ -96,12 +106,6 @@ impl RemoveFieldStatement {
 		)
 		.await?;
 		// Refresh the table cache for fields
-		let Some(tb) = txn.get_tb(ns, db, &table_name, None).await? else {
-			return Err(Error::TbNotFound {
-				name: table_name,
-			}
-			.into());
-		};
 		// Refresh the table cache
 		txn.put_tb(
 			ns_name,
