@@ -6,8 +6,7 @@ use uuid::Uuid;
 use web_time::Instant;
 
 use crate::catalog::QuotaUsageState;
-use crate::catalog::providers::DatabaseProvider;
-use crate::catalog::providers::TableProvider;
+use crate::catalog::providers::{DatabaseProvider, TableProvider};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -17,8 +16,7 @@ use crate::expr::parameterize::expr_to_ident;
 use crate::expr::statements::define::run_indexing;
 use crate::iam::{Action, ResourceKind};
 use crate::key::database::qg::Qg;
-use crate::kvs::Transaction;
-use crate::kvs::{LockType, TransactionType};
+use crate::kvs::{LockType, Transaction, TransactionType};
 use crate::observe::{
 	QuotaEvent, QuotaEventCtx, QuotaEventKind, QuotaEventOutcome, QuotaEventSafe,
 };

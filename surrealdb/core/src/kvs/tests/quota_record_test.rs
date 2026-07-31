@@ -103,14 +103,8 @@ async fn explicit_transaction_commit_preserves_quota_wire_error() {
 		.result
 		.unwrap();
 
-	let responses = ds
-		.execute(
-			"BEGIN; CREATE ent_user:two; COMMIT",
-			&database_owner,
-			None,
-		)
-		.await
-		.unwrap();
+	let responses =
+		ds.execute("BEGIN; CREATE ent_user:two; COMMIT", &database_owner, None).await.unwrap();
 	let error = responses.last().expect("COMMIT response").result.as_ref().unwrap_err();
 	assert_eq!(error.kind_str(), "Quota");
 	assert_eq!(error.quota_details().expect("quota details").code(), "quota_exceeded");

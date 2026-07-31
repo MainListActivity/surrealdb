@@ -21,6 +21,7 @@ value = """{
 	models: {},
 	modules: {},
 	params: {},
+	quota: { defined: false, generation: NONE },
 	sequences: {},
 	tables: {
 			default: 'DEFINE TABLE default TYPE ANY SCHEMALESS PERMISSIONS NONE',

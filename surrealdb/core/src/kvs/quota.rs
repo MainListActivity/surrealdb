@@ -1119,7 +1119,9 @@ pub(crate) fn quota_summary_value(
 ) -> Value {
 	Value::Object(Object::from(map! {
 		"defined" => policy.is_some().into(),
-		"generation" => generation.map_or(Value::None, Value::from),
+		"generation" => generation
+			.filter(|generation| *generation > 0)
+			.map_or(Value::None, Value::from),
 	}))
 }
 

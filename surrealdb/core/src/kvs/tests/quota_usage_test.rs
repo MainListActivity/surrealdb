@@ -3,9 +3,8 @@ use crate::catalog::providers::DatabaseProvider;
 use crate::dbs::Session;
 use crate::key::database::qub::QuotaTableBucket;
 use crate::key::database::qur::QuotaRecordUsage;
-use crate::kvs::KVKey;
 use crate::kvs::quota::QuotaUsageSnapshot;
-use crate::kvs::{Datastore, LockType, TransactionType};
+use crate::kvs::{Datastore, KVKey, LockType, TransactionType};
 use crate::types::PublicValue;
 use crate::val::TableName;
 
@@ -43,6 +42,50 @@ async fn new_database_starts_with_ready_empty_usage_ledger() {
 	assert_eq!(quota.record_count(&TableName::from("user")).await.unwrap(), 0);
 	assert_eq!(quota.field_count(&TableName::from("user")).await.unwrap(), 0);
 	assert_eq!(quota.table_bucket_count(7, "ent-tables").await.unwrap(), 0);
+	tx.cancel().await.unwrap();
+}
+
+#[tokio::test]
+async fn relation_redefinition_keeps_implicit_field_usage_consistent() {
+	let (ds, ns, db) = setup().await;
+	let database_owner = Session::owner().with_ns("tenant").with_db("app");
+	let table = TableName::from("likes");
+
+	ds.execute("DEFINE TABLE likes TYPE RELATION IN person OUT person", &database_owner, None)
+		.await
+		.unwrap()
+		.remove(0)
+		.result
+		.unwrap();
+	let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await.unwrap();
+	assert_eq!(tx.quota_usage(ns, db).field_count(&table).await.unwrap(), 2);
+	tx.cancel().await.unwrap();
+
+	ds.execute("REMOVE TABLE likes", &database_owner, None)
+		.await
+		.unwrap()
+		.remove(0)
+		.result
+		.unwrap();
+	ds.execute(
+		"DEFINE TABLE likes TYPE RELATION IN person OUT person | thing",
+		&database_owner,
+		None,
+	)
+	.await
+	.unwrap()
+	.remove(0)
+	.result
+	.unwrap();
+	ds.execute("REMOVE FIELD out ON TABLE likes", &database_owner, None)
+		.await
+		.unwrap()
+		.remove(0)
+		.result
+		.unwrap();
+
+	let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await.unwrap();
+	assert_eq!(tx.quota_usage(ns, db).field_count(&table).await.unwrap(), 1);
 	tx.cancel().await.unwrap();
 }
 

@@ -14,7 +14,7 @@ backend = ["mem", "rocksdb", "surrealkv"]
 versioned = true
 
 [[test.results]]
-value = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"
+value = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, quota: { defined: false, generation: NONE }, sequences: {  }, tables: {  }, users: {  } }"
 
 [[test.results]]
 value = "{ accesses: {  }, databases: {  }, users: {  } }"

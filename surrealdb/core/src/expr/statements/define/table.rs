@@ -801,10 +801,11 @@ impl DefineTableStatement {
 		if let TableType::Relation(rel) = &tb.table_type {
 			// Set the `in` field as a DEFINE FIELD definition
 			{
-				let key = crate::key::table::fd::new(ns, db, &tb.name, "in");
 				let val = Some(Kind::Record(rel.from.clone()));
-				txn.set(
-					&key,
+				txn.put_tb_field(
+					ns,
+					db,
+					&tb.name,
 					&FieldDefinition {
 						name: Idiom::from(IN.to_vec()),
 						table: tb.name.clone(),
@@ -816,10 +817,11 @@ impl DefineTableStatement {
 			}
 			// Set the `out` field as a DEFINE FIELD definition
 			{
-				let key = crate::key::table::fd::new(ns, db, &tb.name, "out");
 				let val = Some(Kind::Record(rel.to.clone()));
-				txn.set(
-					&key,
+				txn.put_tb_field(
+					ns,
+					db,
+					&tb.name,
 					&FieldDefinition {
 						name: Idiom::from(OUT.to_vec()),
 						table: tb.name.clone(),
