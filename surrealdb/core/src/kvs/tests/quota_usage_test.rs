@@ -58,7 +58,8 @@ async fn relation_redefinition_keeps_implicit_field_usage_consistent() {
 		.result
 		.unwrap();
 	let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await.unwrap();
-	assert_eq!(tx.quota_usage(ns, db).field_count(&table).await.unwrap(), 2);
+	assert_eq!(tx.quota_usage(ns, db).field_count(&table).await.unwrap(), 0);
+	assert_eq!(tx.scan_quota_usage(ns, db).await.unwrap().fields, 0);
 	tx.cancel().await.unwrap();
 
 	ds.execute("REMOVE TABLE likes", &database_owner, None)
@@ -85,7 +86,7 @@ async fn relation_redefinition_keeps_implicit_field_usage_consistent() {
 		.unwrap();
 
 	let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await.unwrap();
-	assert_eq!(tx.quota_usage(ns, db).field_count(&table).await.unwrap(), 1);
+	assert_eq!(tx.quota_usage(ns, db).field_count(&table).await.unwrap(), 0);
 	tx.cancel().await.unwrap();
 }
 
