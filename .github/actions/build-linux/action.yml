@@ -39,6 +39,10 @@ inputs:
     description: 'Compile with release flag'
     required: false
     default: 'true'
+  profile:
+    description: 'Optional Cargo profile to use instead of --release'
+    required: false
+    default: ''
 
 outputs:
   artifact-name:
@@ -133,8 +137,13 @@ runs:
           fi
         fi
         if [[ "${{ inputs.release }}" == "true" ]]; then
-          extra_args="${extra_args} --release"
-          compile_profile="release"
+          if [[ -n "${{ inputs.profile }}" ]]; then
+            extra_args="${extra_args} --profile ${{ inputs.profile }}"
+            compile_profile="${{ inputs.profile }}"
+          else
+            extra_args="${extra_args} --release"
+            compile_profile="release"
+          fi
         fi
 
         # Builder entrypoint downloads ONNX Runtime in-container when ORT_DOWNLOAD_URL is set.
