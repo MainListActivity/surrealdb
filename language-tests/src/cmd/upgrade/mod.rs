@@ -566,6 +566,12 @@ async fn run_task_inner(
 		}
 	};
 	process.quit().await?;
+	process::SurrealProcess::migrate_native_quota_datastore(
+		&config,
+		&run.config.to,
+		dir,
+	)
+	.await?;
 
 	// run tests on existing dataset.
 	// Loop is a workaround for some cases where the start up of the database suddenly becomes

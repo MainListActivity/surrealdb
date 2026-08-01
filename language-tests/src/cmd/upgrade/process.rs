@@ -40,28 +40,73 @@ pub struct SurrealProcess {
 	port: u16,
 }
 
+fn binary_command(version: &DsVersion) -> Command {
+	match version {
+		DsVersion::Path(x) => {
+			let path = Path::new(x).join("target").join("debug").join("surreal");
+			Command::new(path)
+		}
+		DsVersion::Version(x) => {
+			let path = Path::new(".binary_cache").join(format!("surreal-v{x}"));
+			Command::new(path)
+		}
+	}
+}
+
+fn datastore_endpoint(config: &Config, tmp_dir: &str) -> String {
+	match config.backend {
+		UpgradeBackend::RocksDb => format!("rocksdb://{tmp_dir}/ds"),
+		UpgradeBackend::SurrealKv => format!("surrealkv://{tmp_dir}/ds"),
+	}
+}
+
 impl SurrealProcess {
+	/// Migrate an upstream datastore before the current native-quota fork opens it.
+	///
+	/// Tagged targets are vanilla releases and do not expose this command. A path
+	/// target is the current checkout, so the final upgrade hop must exercise the
+	/// same explicit offline migration required in production.
+	pub async fn migrate_native_quota_datastore(
+		config: &Config,
+		version: &DsVersion,
+		tmp_dir: &str,
+	) -> Result<()> {
+		if !matches!(version, DsVersion::Path(_)) {
+			return Ok(());
+		}
+
+		let endpoint = datastore_endpoint(config, tmp_dir);
+		let output = binary_command(version)
+			.args([
+				"datastore",
+				"migrate",
+				&endpoint,
+				"--snapshot",
+				"ephemeral-upgrade-test-imports",
+				"--confirm-offline",
+			])
+			.stdin(Stdio::null())
+			.output()
+			.await
+			.context("Failed to run native quota datastore migration")?;
+		if !output.status.success() {
+			bail!(
+				"Native quota datastore migration failed.\n  > process stdout:\n{}\n  > process stderr:\n{}",
+				String::from_utf8_lossy(&output.stdout),
+				String::from_utf8_lossy(&output.stderr),
+			);
+		}
+		Ok(())
+	}
+
 	pub async fn new(
 		config: &Config,
 		version: &DsVersion,
 		tmp_dir: &str,
 		port: u16,
 	) -> Result<SurrealProcess, anyhow::Error> {
-		let mut command = match version {
-			DsVersion::Path(x) => {
-				let path = Path::new(x).join("target").join("debug").join("surreal");
-				Command::new(path)
-			}
-			DsVersion::Version(x) => {
-				let path = Path::new(".binary_cache").join(format!("surreal-v{x}"));
-				Command::new(path)
-			}
-		};
-
-		let endpoint = match config.backend {
-			UpgradeBackend::RocksDb => format!("rocksdb://{tmp_dir}/ds"),
-			UpgradeBackend::SurrealKv => format!("surrealkv://{tmp_dir}/ds"),
-		};
+		let mut command = binary_command(version);
+		let endpoint = datastore_endpoint(config, tmp_dir);
 
 		let bind = format!("127.0.0.1:{port}");
 		let common_args =
