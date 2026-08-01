@@ -1,6 +1,7 @@
 //! Reproducible RocksDB native-quota release benchmark.
 
 #![allow(clippy::unwrap_used)]
+#![recursion_limit = "256"]
 
 use std::fs;
 use std::path::{Path, PathBuf};

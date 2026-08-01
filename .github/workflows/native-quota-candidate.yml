@@ -75,7 +75,7 @@ jobs:
           revision="$(jq -er '.manifest_revision' compatibility/native-quota-v1.json)"
           stable_branch="$(jq -er '.release_supply_chain.stable_branch' compatibility/native-quota-v1.json)"
           image="$(jq -er '.release_supply_chain.image_repository' compatibility/native-quota-v1.json)"
-          expected_line="releases/sck-$(printf '%s' "$release" | sed -E 's/^([0-9]+\\.[0-9]+).*/\\1/')"
+          expected_line="releases/sck-$(printf '%s' "$release" | sed -E 's/^([0-9]+\.[0-9]+).*/\1/')"
 
           test "$stable_branch" = "$expected_line"
           test "$image" = "ghcr.io/mainlistactivity/surrealdb-native-quota"
