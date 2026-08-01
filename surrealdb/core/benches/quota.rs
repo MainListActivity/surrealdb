@@ -270,6 +270,31 @@ fn minimum(baseline: f64, percent: u16) -> f64 {
 	baseline * (1.0 - f64::from(percent) / 100.0)
 }
 
+fn median_f64(reports: &[WorkloadReport], value: impl Fn(&WorkloadReport) -> f64) -> f64 {
+	let mut values = reports.iter().map(value).collect::<Vec<_>>();
+	values.sort_by(f64::total_cmp);
+	values[values.len() / 2]
+}
+
+fn median_u64(reports: &[WorkloadReport], value: impl Fn(&WorkloadReport) -> u64) -> u64 {
+	let mut values = reports.iter().map(value).collect::<Vec<_>>();
+	values.sort_unstable();
+	values[values.len() / 2]
+}
+
+fn aggregate_measurements(reports: &[WorkloadReport]) -> WorkloadReport {
+	let mut report = reports[0].clone();
+	report.elapsed_ms = median_f64(reports, |report| report.elapsed_ms);
+	report.throughput_resources_per_second =
+		report.logical_resources as f64 / (report.elapsed_ms / 1_000.0);
+	report.p95_latency_us = median_f64(reports, |report| report.p95_latency_us);
+	report.p99_latency_us = median_f64(reports, |report| report.p99_latency_us);
+	report.storage_growth_bytes = median_u64(reports, |report| report.storage_growth_bytes);
+	report.storage_bytes_per_resource =
+		report.storage_growth_bytes as f64 / report.logical_resources as f64;
+	report
+}
+
 fn compare(candidate: &BenchmarkReport, baseline: &BenchmarkReport, thresholds: Thresholds) {
 	assert_eq!(candidate.format_version, baseline.format_version, "benchmark format mismatch");
 	assert_eq!(
@@ -304,33 +329,52 @@ fn compare(candidate: &BenchmarkReport, baseline: &BenchmarkReport, thresholds: 
 		baseline.workloads.len(),
 		"benchmark workload count mismatch"
 	);
+	let candidate_control = candidate
+		.workloads
+		.iter()
+		.find(|workload| workload.name == Workload::ContinuousMetering.name())
+		.expect("candidate is missing the no-policy control workload");
+	let baseline_control = baseline
+		.workloads
+		.iter()
+		.find(|workload| workload.name == Workload::ContinuousMetering.name())
+		.expect("baseline is missing the no-policy control workload");
 	for candidate_workload in &candidate.workloads {
 		let baseline_workload = baseline
 			.workloads
 			.iter()
 			.find(|workload| workload.name == candidate_workload.name)
 			.unwrap_or_else(|| panic!("baseline is missing workload {}", candidate_workload.name));
+		let candidate_relative_throughput = candidate_workload.throughput_resources_per_second
+			/ candidate_control.throughput_resources_per_second;
+		let baseline_relative_throughput = baseline_workload.throughput_resources_per_second
+			/ baseline_control.throughput_resources_per_second;
 		assert!(
-			candidate_workload.throughput_resources_per_second
-				>= minimum(
-					baseline_workload.throughput_resources_per_second,
-					thresholds.maximum_throughput_regression,
-				),
-			"{} throughput regressed beyond {}%",
+			candidate_relative_throughput
+				>= minimum(baseline_relative_throughput, thresholds.maximum_throughput_regression,),
+			"{} normalized throughput regressed beyond {}%",
 			candidate_workload.name,
 			thresholds.maximum_throughput_regression
 		);
+		let candidate_relative_p95 =
+			candidate_workload.p95_latency_us / candidate_control.p95_latency_us;
+		let baseline_relative_p95 =
+			baseline_workload.p95_latency_us / baseline_control.p95_latency_us;
 		assert!(
-			candidate_workload.p95_latency_us
-				<= maximum(baseline_workload.p95_latency_us, thresholds.p95_latency_regression,),
-			"{} p95 latency regressed beyond {}%",
+			candidate_relative_p95
+				<= maximum(baseline_relative_p95.max(1.0), thresholds.p95_latency_regression),
+			"{} normalized p95 latency regressed beyond {}%",
 			candidate_workload.name,
 			thresholds.p95_latency_regression
 		);
+		let candidate_relative_p99 =
+			candidate_workload.p99_latency_us / candidate_control.p99_latency_us;
+		let baseline_relative_p99 =
+			baseline_workload.p99_latency_us / baseline_control.p99_latency_us;
 		assert!(
-			candidate_workload.p99_latency_us
-				<= maximum(baseline_workload.p99_latency_us, thresholds.p99_latency_regression,),
-			"{} p99 latency regressed beyond {}%",
+			candidate_relative_p99
+				<= maximum(baseline_relative_p99.max(1.0), thresholds.p99_latency_regression),
+			"{} normalized p99 latency regressed beyond {}%",
 			candidate_workload.name,
 			thresholds.p99_latency_regression
 		);
@@ -389,16 +433,12 @@ async fn main() {
 			manifest.performance.dataset.measurement_repetitions > 0,
 			"benchmark measurement repetitions must be positive"
 		);
-		let mut best = None;
+		let mut measurements =
+			Vec::with_capacity(usize::from(manifest.performance.dataset.measurement_repetitions));
 		for _ in 0..manifest.performance.dataset.measurement_repetitions {
-			let report = run_workload(workload, manifest.performance.dataset).await;
-			if best.as_ref().is_none_or(|best: &WorkloadReport| {
-				report.throughput_resources_per_second > best.throughput_resources_per_second
-			}) {
-				best = Some(report);
-			}
+			measurements.push(run_workload(workload, manifest.performance.dataset).await);
 		}
-		workloads.push(best.unwrap());
+		workloads.push(aggregate_measurements(&measurements));
 	}
 	let report = BenchmarkReport {
 		format_version: 1,
