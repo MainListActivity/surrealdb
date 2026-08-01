@@ -36,6 +36,7 @@ struct Dataset {
 	warmup_operations: u32,
 	sample_operations: u32,
 	batch_size: u32,
+	measurement_repetitions: u16,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize)]
@@ -295,6 +296,10 @@ fn compare(candidate: &BenchmarkReport, baseline: &BenchmarkReport, thresholds: 
 		"benchmark batch dataset mismatch"
 	);
 	assert_eq!(
+		candidate.dataset.measurement_repetitions, baseline.dataset.measurement_repetitions,
+		"benchmark repetition count mismatch"
+	);
+	assert_eq!(
 		candidate.workloads.len(),
 		baseline.workloads.len(),
 		"benchmark workload count mismatch"
@@ -380,7 +385,20 @@ async fn main() {
 		Workload::RegexMultiMatch,
 		Workload::Batch,
 	] {
-		workloads.push(run_workload(workload, manifest.performance.dataset).await);
+		assert!(
+			manifest.performance.dataset.measurement_repetitions > 0,
+			"benchmark measurement repetitions must be positive"
+		);
+		let mut best = None;
+		for _ in 0..manifest.performance.dataset.measurement_repetitions {
+			let report = run_workload(workload, manifest.performance.dataset).await;
+			if best.as_ref().is_none_or(|best: &WorkloadReport| {
+				report.throughput_resources_per_second > best.throughput_resources_per_second
+			}) {
+				best = Some(report);
+			}
+		}
+		workloads.push(best.unwrap());
 	}
 	let report = BenchmarkReport {
 		format_version: 1,

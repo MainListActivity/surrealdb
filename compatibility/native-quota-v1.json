@@ -143,7 +143,8 @@
     "dataset": {
       "warmup_operations": 32,
       "sample_operations": 256,
-      "batch_size": 16
+      "batch_size": 16,
+      "measurement_repetitions": 7
     },
     "baseline_artifact": "native-quota-rocksdb-v1.json",
     "baseline_command": "cargo bench -p surrealdb-core --bench quota --features kv-rocksdb -- --output ../../compatibility/native-quota-rocksdb-v1.json",
