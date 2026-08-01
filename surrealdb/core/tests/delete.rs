@@ -69,8 +69,7 @@ async fn delete_without_references_skips_reference_range_delete() -> Result<()> 
 	let metrics = observer.snapshot();
 	assert_eq!(metrics.len(), 1, "expected one successful write transaction: {metrics:?}");
 	assert_eq!(
-		metrics[0].ops_del,
-		2,
+		metrics[0].ops_del, 2,
 		"plain record delete should record the point delete and quota generation fence"
 	);
 
