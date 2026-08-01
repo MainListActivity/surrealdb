@@ -2427,8 +2427,24 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 		}
 	}
 
-	#[tokio::test]
-	async fn test_signin_bearer_for_user() {
+	#[test]
+	fn test_signin_bearer_for_user() {
+		std::thread::Builder::new()
+			.name("signin-bearer-user".to_owned())
+			.stack_size(8 * 1024 * 1024)
+			.spawn(|| {
+				tokio::runtime::Builder::new_current_thread()
+					.enable_all()
+					.build()
+					.unwrap()
+					.block_on(test_signin_bearer_for_user_inner());
+			})
+			.unwrap()
+			.join()
+			.unwrap();
+	}
+
+	async fn test_signin_bearer_for_user_inner() {
 		let test_levels = vec![
 			TestLevel {
 				level: "ROOT",
