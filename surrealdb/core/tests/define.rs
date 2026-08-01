@@ -13,8 +13,9 @@ use surrealdb_core::syn;
 use surrealdb_types::Value;
 use web_time::SystemTime;
 
-fn is_concurrent_index_status_retryable_conflict(error: &str) -> bool {
-	error.starts_with("Transaction conflict:")
+fn is_concurrent_index_status_retryable_conflict(error: &surrealdb_types::Error) -> bool {
+	error.to_string().starts_with("Transaction conflict:")
+		|| error.quota_details().is_some_and(|details| details.retryable())
 }
 
 #[tokio::test]
@@ -139,7 +140,7 @@ async fn define_statement_index_concurrently_building_status(
 				Ok(_) => {
 					appended_count += 1;
 				}
-				Err(e) if is_concurrent_index_status_retryable_conflict(&e.to_string()) => {
+				Err(e) if is_concurrent_index_status_retryable_conflict(&e) => {
 					continue;
 				}
 				Err(e) => {
@@ -550,8 +551,8 @@ async fn permissions_checks_define_function() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check_success = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: { greet: \"DEFINE FUNCTION fn::greet() { RETURN 'Hello' } PERMISSIONS FULL\" }, models: {  }, modules: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }".to_string();
-	let check_error = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }".to_string();
+	let check_success = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: { greet: \"DEFINE FUNCTION fn::greet() { RETURN 'Hello' } PERMISSIONS FULL\" }, models: {  }, modules: {  }, params: {  }, quota: { defined: false, generation: NONE }, sequences: { }, tables: {  }, users: {  } }".to_string();
+	let check_error = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, quota: { defined: false, generation: NONE }, sequences: { }, tables: {  }, users: {  } }".to_string();
 
 	let test_cases = [
 		// Root level
@@ -591,8 +592,8 @@ async fn permissions_checks_define_analyzer() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check_success = "{ accesses: {  }, analyzers: { analyzer: 'DEFINE ANALYZER analyzer TOKENIZERS BLANK' }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, tables: {  }, sequences: { }, users: {  } }".to_string();
-	let check_error = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: {}, tables: {  }, users: {  } }".to_string();
+	let check_success = "{ accesses: {  }, analyzers: { analyzer: 'DEFINE ANALYZER analyzer TOKENIZERS BLANK' }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, quota: { defined: false, generation: NONE }, tables: {  }, sequences: { }, users: {  } }".to_string();
+	let check_error = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, quota: { defined: false, generation: NONE }, sequences: {}, tables: {  }, users: {  } }".to_string();
 
 	let test_cases = [
 		// Root level
@@ -771,8 +772,8 @@ async fn permissions_checks_define_access_db() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check_success = "{ accesses: { access: \"DEFINE ACCESS access ON DATABASE TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE\" }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }".to_string();
-	let check_error = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }".to_string();
+	let check_success = "{ accesses: { access: \"DEFINE ACCESS access ON DATABASE TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE\" }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, quota: { defined: false, generation: NONE }, sequences: { }, tables: {  }, users: {  } }".to_string();
+	let check_error = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, quota: { defined: false, generation: NONE }, sequences: { }, tables: {  }, users: {  } }".to_string();
 
 	let test_cases = [
 		// Root level
@@ -998,8 +999,8 @@ async fn permissions_checks_define_user_db() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check_success = r#"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: { }, tables: {  }, users: { user: "DEFINE USER user ON DATABASE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h" } }"#.to_string();
-	let check_error = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }".to_string();
+	let check_success = r#"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, quota: { defined: false, generation: NONE }, sequences: { }, tables: {  }, users: { user: "DEFINE USER user ON DATABASE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h" } }"#.to_string();
+	let check_error = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, quota: { defined: false, generation: NONE }, sequences: { }, tables: {  }, users: {  } }".to_string();
 
 	let test_cases = [
 		// Root level
@@ -1042,8 +1043,8 @@ async fn permissions_checks_define_access_record() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check_success = r#"{ accesses: { account: "DEFINE ACCESS account ON DATABASE TYPE RECORD WITH JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 15m, FOR SESSION 12h" }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }"#.to_string();
-	let check_error = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }".to_string();
+	let check_success = r#"{ accesses: { account: "DEFINE ACCESS account ON DATABASE TYPE RECORD WITH JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 15m, FOR SESSION 12h" }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, quota: { defined: false, generation: NONE }, sequences: { }, tables: {  }, users: {  } }"#.to_string();
+	let check_error = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, quota: { defined: false, generation: NONE }, sequences: { }, tables: {  }, users: {  } }".to_string();
 
 	let test_cases = [
 		// Root level
@@ -1083,8 +1084,8 @@ async fn permissions_checks_define_param() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check_success = r#"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: { param: "DEFINE PARAM $param VALUE 'foo' PERMISSIONS FULL" }, sequences: { }, tables: {  }, users: {  } }"#.to_string();
-	let check_error = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }".to_string();
+	let check_success = r#"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: { param: "DEFINE PARAM $param VALUE 'foo' PERMISSIONS FULL" }, quota: { defined: false, generation: NONE }, sequences: { }, tables: {  }, users: {  } }"#.to_string();
+	let check_error = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, quota: { defined: false, generation: NONE }, sequences: { }, tables: {  }, users: {  } }".to_string();
 
 	let test_cases = [
 		// Root level
@@ -1121,8 +1122,8 @@ async fn permissions_checks_define_table() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check_success = r#"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: { }, tables: { TB: 'DEFINE TABLE `TB` TYPE ANY SCHEMALESS PERMISSIONS NONE' }, users: {  } }"#.to_string();
-	let check_error = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }".to_string();
+	let check_success = r#"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, quota: { defined: false, generation: NONE }, sequences: { }, tables: { TB: 'DEFINE TABLE `TB` TYPE ANY SCHEMALESS PERMISSIONS NONE' }, users: {  } }"#.to_string();
+	let check_error = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, quota: { defined: false, generation: NONE }, sequences: { }, tables: {  }, users: {  } }".to_string();
 
 	let test_cases = [
 		// Root level

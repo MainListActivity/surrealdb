@@ -68,7 +68,11 @@ async fn delete_without_references_skips_reference_range_delete() -> Result<()> 
 
 	let metrics = observer.snapshot();
 	assert_eq!(metrics.len(), 1, "expected one successful write transaction: {metrics:?}");
-	assert_eq!(metrics[0].ops_del, 1, "plain record delete should only record the point delete");
+	assert_eq!(
+		metrics[0].ops_del,
+		2,
+		"plain record delete should record the point delete and quota generation fence"
+	);
 
 	Ok(())
 }
@@ -102,8 +106,8 @@ async fn delete_with_reference_keys_still_deletes_reference_range() -> Result<()
 	let metrics = observer.snapshot();
 	assert_eq!(metrics.len(), 1, "expected one successful write transaction: {metrics:?}");
 	assert_eq!(
-		metrics[0].ops_del, 2,
-		"referenced record delete should record the point delete and reference range delete"
+		metrics[0].ops_del, 3,
+		"referenced record delete should record the point delete, reference range delete, and quota generation fence"
 	);
 
 	let mut res = ds.execute("RETURN user:alice<~(message FIELD author)", &ses, None).await?;

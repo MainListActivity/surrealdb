@@ -96,12 +96,17 @@ pub type Version = u64;
 
 pub(crate) fn is_retryable_transaction_conflict(err: &anyhow::Error) -> bool {
 	if let Some(kvs_err) = err.downcast_ref::<self::err::Error>() {
-		return kvs_err.is_retryable();
+		return kvs_err.is_retryable()
+			|| matches!(kvs_err, self::err::Error::TransactionConditionNotMet);
 	}
-	matches!(
-		err.downcast_ref::<crate::err::Error>(),
-		Some(crate::err::Error::Kvs(kvs_err)) if kvs_err.is_retryable()
-	)
+	match err.downcast_ref::<crate::err::Error>() {
+		Some(crate::err::Error::Kvs(kvs_err)) => {
+			kvs_err.is_retryable()
+				|| matches!(kvs_err, self::err::Error::TransactionConditionNotMet)
+		}
+		Some(crate::err::Error::QuotaConflict) => true,
+		_ => false,
+	}
 }
 
 #[cfg(test)]
@@ -316,6 +321,20 @@ mod retry_conflict_tests {
 		let err = anyhow::Error::new(crate::err::Error::Kvs(super::Error::TransactionConflict(
 			"conflict".into(),
 		)));
+
+		assert!(is_retryable_transaction_conflict(&err));
+	}
+
+	#[test]
+	fn retryable_transaction_conflict_accepts_quota_conflict() {
+		let err = anyhow::Error::new(crate::err::Error::QuotaConflict);
+
+		assert!(is_retryable_transaction_conflict(&err));
+	}
+
+	#[test]
+	fn retryable_transaction_conflict_accepts_condition_not_met() {
+		let err = anyhow::Error::new(super::Error::TransactionConditionNotMet);
 
 		assert!(is_retryable_transaction_conflict(&err));
 	}
