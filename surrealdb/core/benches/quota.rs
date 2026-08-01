@@ -426,24 +426,31 @@ fn arguments() -> (Option<PathBuf>, Option<PathBuf>) {
 async fn main() {
 	let manifest: Manifest = serde_json::from_str(MANIFEST).unwrap();
 	let (output, baseline) = arguments();
-	let mut workloads = Vec::new();
-	for workload in [
+	let workload_definitions = [
 		Workload::ContinuousMetering,
 		Workload::FiniteExactPolicy,
 		Workload::RegexMultiMatch,
 		Workload::Batch,
-	] {
-		assert!(
-			manifest.performance.dataset.measurement_repetitions > 0,
-			"benchmark measurement repetitions must be positive"
-		);
-		let mut measurements =
-			Vec::with_capacity(usize::from(manifest.performance.dataset.measurement_repetitions));
-		for _ in 0..manifest.performance.dataset.measurement_repetitions {
-			measurements.push(run_workload(workload, manifest.performance.dataset).await);
+	];
+	assert!(
+		manifest.performance.dataset.measurement_repetitions > 0,
+		"benchmark measurement repetitions must be positive"
+	);
+	let mut measurements = workload_definitions
+		.iter()
+		.map(|_| {
+			Vec::with_capacity(usize::from(manifest.performance.dataset.measurement_repetitions))
+		})
+		.collect::<Vec<_>>();
+	for repetition in 0..manifest.performance.dataset.measurement_repetitions {
+		for offset in 0..workload_definitions.len() {
+			let index = (usize::from(repetition) + offset) % workload_definitions.len();
+			measurements[index].push(
+				run_workload(workload_definitions[index], manifest.performance.dataset).await,
+			);
 		}
-		workloads.push(aggregate_measurements(&measurements));
 	}
+	let workloads = measurements.iter().map(|reports| aggregate_measurements(reports)).collect();
 	let report = BenchmarkReport {
 		format_version: 1,
 		benchmark_revision: manifest.performance.benchmark_revision.clone(),
