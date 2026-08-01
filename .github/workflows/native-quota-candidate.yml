@@ -320,6 +320,7 @@ jobs:
           extra-features: jwks,ml
           upload: true
           release: true
+          profile: release-thin
 
   publish-candidate:
     name: Publish signed multi-arch candidate

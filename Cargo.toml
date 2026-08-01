@@ -514,6 +514,14 @@ opt-level = 3
 panic = 'abort'
 strip = true
 
+# Production release profile for memory-constrained cross-architecture builders.
+# ThinLTO retains cross-crate optimisation while avoiding the peak memory usage
+# of a single fat-LTO codegen unit during the final link.
+[profile.release-thin]
+inherits = "release"
+codegen-units = 16
+lto = "thin"
+
 # Faster release-mode checks/lints in CI (no whole-crate LTO)
 [profile.clippy-release]
 inherits = "release"
