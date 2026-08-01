@@ -164,6 +164,10 @@ const IGNORE_TESTS: &[&str] = &[
 	// (only `INFO FOR DATABASE VERSION …`); the legacy parser used by the
 	// language-test harness does.
 	"language/statements/info/version_clause.surql",
+	// Native quota is a fork-only DDL extension implemented by the runtime
+	// parser. Keep its executable language test out of the standalone upstream
+	// parser corpus until that parser exposes extension registration.
+	"language/statements/define/quota/native_quota.surql",
 ];
 
 #[test]

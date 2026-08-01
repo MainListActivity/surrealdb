@@ -321,6 +321,7 @@ async fn relate_enforced() -> Result<()> {
 	models: {},
 	modules: {},
 	params: {},
+	quota: { defined: false, generation: NONE },
 	sequences: {},
 	tables: {
 		a: 'DEFINE TABLE a TYPE ANY SCHEMALESS PERMISSIONS NONE',

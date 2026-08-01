@@ -23,6 +23,25 @@ use tracing::{error, info};
 
 use crate::helpers::{new_ds, new_ns_db};
 
+fn is_retryable_quota_error(error: &surrealdb_types::Error) -> bool {
+	error.quota_details().is_some_and(|details| details.retryable())
+}
+
+async fn execute_one_retrying_quota_conflicts(
+	dbs: &Datastore,
+	session: &Session,
+	sql: &str,
+) -> Result<()> {
+	loop {
+		let mut responses = dbs.execute(sql, session, None).await?;
+		match responses.remove(0).result {
+			Ok(_) => return Ok(()),
+			Err(error) if is_retryable_quota_error(&error) => tokio::task::yield_now().await,
+			Err(error) => return Err(error.into()),
+		}
+	}
+}
+
 async fn concurrent_tasks(
 	dbs: Arc<Datastore>,
 	session: &Session,
@@ -425,14 +444,12 @@ async fn hnsw_concurrent_writes() -> Result<()> {
 		let session = session.clone();
 		tasks.push(tokio::spawn(async move {
 			for (r, v) in chunk {
-				let mut res = dbs
-					.execute(
-						&format!("CREATE {} SET v={v} RETURN NONE;", r.to_sql()),
-						&session,
-						None,
-					)
-					.await?;
-				res.remove(0).result?;
+				execute_one_retrying_quota_conflicts(
+					&dbs,
+					&session,
+					&format!("CREATE {} SET v={v} RETURN NONE;", r.to_sql()),
+				)
+				.await?;
 			}
 			Ok::<(), anyhow::Error>(())
 		}));
@@ -482,7 +499,9 @@ where
 	while !cancellation.is_cancelled() {
 		count += 1;
 		let sql = sql_func(prefix, count);
-		dbs.execute(&sql, &session, None).await?.remove(0).result.with_context(|| sql.clone())?;
+		execute_one_retrying_quota_conflicts(&dbs, &session, &sql)
+			.await
+			.with_context(|| sql.clone())?;
 	}
 	Ok(())
 }
