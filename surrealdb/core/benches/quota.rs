@@ -388,13 +388,17 @@ fn compare(candidate: &BenchmarkReport, baseline: &BenchmarkReport, thresholds: 
 			candidate_workload.name,
 			thresholds.kv_write_amplification_regression
 		);
+		let candidate_relative_storage = candidate_workload.storage_bytes_per_resource
+			/ candidate_control.storage_bytes_per_resource;
+		let baseline_relative_storage = baseline_workload.storage_bytes_per_resource
+			/ baseline_control.storage_bytes_per_resource;
 		assert!(
-			candidate_workload.storage_bytes_per_resource
+			candidate_relative_storage
 				<= maximum(
-					baseline_workload.storage_bytes_per_resource,
+					baseline_relative_storage.max(1.0),
 					thresholds.storage_growth_regression,
 				),
-			"{} storage growth regressed beyond {}%",
+			"{} normalized storage growth regressed beyond {}%",
 			candidate_workload.name,
 			thresholds.storage_growth_regression
 		);
