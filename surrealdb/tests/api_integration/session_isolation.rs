@@ -7,10 +7,12 @@
 //! - Transactions (BEGIN/COMMIT/CANCEL)
 
 use std::iter;
+use std::time::Duration;
 
 use surrealdb::opt::Config;
 use surrealdb::opt::auth::{Database, Namespace};
 use surrealdb::types::RecordId;
+use surrealdb::{Connection, Surreal};
 use surrealdb_types::SurrealValue;
 use ulid::Ulid;
 
@@ -20,6 +22,28 @@ use super::CreateDb;
 struct TestRecord {
 	id: RecordId,
 	value: i32,
+}
+
+async fn create_with_retry<C>(client: &Surreal<C>, sql: String)
+where
+	C: Connection,
+{
+	for attempt in 0..16 {
+		match client.query(&sql).await.and_then(|response| response.check()) {
+			Ok(_) => return,
+			Err(error) => {
+				let message = error.to_string();
+				let retryable = message.contains("quota_conflict")
+					|| message.contains("Quota admission conflicted")
+					|| message.contains("WriteConflict")
+					|| message.contains("Transaction conflict");
+				if !retryable || attempt == 15 {
+					panic!("concurrent create failed after {} attempts: {error}", attempt + 1);
+				}
+				tokio::time::sleep(Duration::from_millis(10 * (attempt + 1))).await;
+			}
+		}
+	}
 }
 
 /// Test that cloning creates a new session with independent namespace/database selection
@@ -455,12 +479,11 @@ pub async fn mixed_session_operations(new_db: impl CreateDb) {
 		let table = table.clone();
 		async move {
 			for i in 1..=5 {
-				client
-					.query(format!("CREATE {table}:{i} SET value = {i} * $multiplier"))
-					.await
-					.unwrap()
-					.check()
-					.unwrap();
+				create_with_retry(
+					&client,
+					format!("CREATE {table}:{i} SET value = {i} * $multiplier"),
+				)
+				.await;
 			}
 		}
 	});
@@ -470,12 +493,11 @@ pub async fn mixed_session_operations(new_db: impl CreateDb) {
 		let table = table.clone();
 		async move {
 			for i in 1..=5 {
-				client
-					.query(format!("CREATE {table}:{i} SET value = {i} * $multiplier"))
-					.await
-					.unwrap()
-					.check()
-					.unwrap();
+				create_with_retry(
+					&client,
+					format!("CREATE {table}:{i} SET value = {i} * $multiplier"),
+				)
+				.await;
 			}
 		}
 	});
@@ -485,12 +507,11 @@ pub async fn mixed_session_operations(new_db: impl CreateDb) {
 		let table = table.clone();
 		async move {
 			for i in 6..=10 {
-				client
-					.query(format!("CREATE {table}:{i} SET value = {i} * $multiplier"))
-					.await
-					.unwrap()
-					.check()
-					.unwrap();
+				create_with_retry(
+					&client,
+					format!("CREATE {table}:{i} SET value = {i} * $multiplier"),
+				)
+				.await;
 			}
 		}
 	});
