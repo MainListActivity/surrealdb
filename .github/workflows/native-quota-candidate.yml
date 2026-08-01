@@ -508,6 +508,10 @@ jobs:
         run: |
           set -euo pipefail
           for platform in linux/amd64 linux/arm64; do
+            # A Docker daemon cannot bind the same multi-arch digest reference to
+            # two different platform images at once. Remove the previous local
+            # binding before resolving the next platform from the manifest list.
+            docker image rm --force "$IMAGE@$DIGEST" >/dev/null 2>&1 || true
             output="$(docker run --rm --platform "$platform" "$IMAGE@$DIGEST" version)"
             grep -F "$RELEASE" <<<"$output"
           done
