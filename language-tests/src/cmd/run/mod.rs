@@ -510,8 +510,7 @@ async fn run_test_body(
 			// schema's planner-strategy seam).
 			let settings = gql::GqlParserSettings::default();
 			let source = &run.case.test.source.as_bytes();
-			let query = match gql::parse_to_plan_with_settings(&run.case.test.source, settings)
-			{
+			let query = match gql::parse_to_plan_with_settings(&run.case.test.source, settings) {
 				Ok(x) => x,
 				Err(e) => {
 					return Ok(BodyOutcome::Early(TestTaskResult::ParserError(
