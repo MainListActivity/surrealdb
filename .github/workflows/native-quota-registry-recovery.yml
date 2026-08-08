@@ -1,0 +1,70 @@
+name: Recover failed native quota image
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Fixed release tag left by the failed candidate
+        required: true
+        type: string
+      sha_tag:
+        description: Fixed git-SHA tag left by the failed candidate
+        required: true
+        type: string
+      digest:
+        description: Exact manifest digest to remove
+        required: true
+        type: string
+      confirm:
+        description: Type DELETE_FAILED_CANDIDATE_IMAGE to authorize removal
+        required: true
+        type: string
+
+permissions:
+  packages: write
+
+jobs:
+  remove-failed-image:
+    name: Remove one failed image version
+    if: inputs.confirm == 'DELETE_FAILED_CANDIDATE_IMAGE'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden the runner
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      - name: Verify and remove the exact failed image version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OWNER: ${{ github.repository_owner }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          SHA_TAG: ${{ inputs.sha_tag }}
+          DIGEST: ${{ inputs.digest }}
+        run: |
+          set -euo pipefail
+          case "$DIGEST" in
+            sha256:[0-9a-f][0-9a-f]*) ;;
+            *) echo "::error::digest must be sha256:<hex>"; exit 1 ;;
+          esac
+          digest_tag="sha256-${DIGEST#sha256:}"
+          versions="$(gh api --paginate --slurp \
+            "users/$OWNER/packages/container/surrealdb-native-quota/versions?per_page=100" | jq 'add')"
+          matches="$(jq -c \
+            --arg release "$RELEASE_TAG" \
+            --arg sha "$SHA_TAG" \
+            --arg digest_tag "$digest_tag" \
+            '[.[] | select((.metadata.container.tags // []) | index($release))
+              | select((.metadata.container.tags // []) | index($sha))
+              | select((.metadata.container.tags // []) | index($digest_tag))]' <<<"$versions")"
+          count="$(jq 'length' <<<"$matches")"
+          test "$count" -eq 1 || {
+            echo "::error::expected exactly one package version for the supplied tags and digest, found $count"
+            jq -c '.[] | {id,name,tags:(.metadata.container.tags // [])}' <<<"$matches"
+            exit 1
+          }
+          id="$(jq -er '.[0].id' <<<"$matches")"
+          jq -c '.[0] | {id,name,tags:(.metadata.container.tags // [])}' <<<"$matches"
+          gh api --method DELETE \
+            "users/$OWNER/packages/container/surrealdb-native-quota/versions/$id"
+          echo "Removed failed native quota image version $id ($DIGEST)."
