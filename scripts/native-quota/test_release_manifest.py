@@ -46,6 +46,10 @@ class ReleaseManifestTests(unittest.TestCase):
                     self.compatibility["fork_release"],
                     "sha-" + self.sha,
                 ],
+                "platform_digests": {
+                    "amd64": "sha256:" + "c" * 64,
+                    "arm64": "sha256:" + "d" * 64,
+                },
                 "labels": {
                     **self.compatibility["oci_labels"],
                     "org.opencontainers.image.revision": self.sha,
@@ -74,6 +78,7 @@ class ReleaseManifestTests(unittest.TestCase):
                 "image_signature": {"sha256": "3" * 64},
                 "sbom": {"sha256": "4" * 64},
                 "provenance": {"sha256": "5" * 64},
+                "image_index": {"sha256": "7" * 64},
                 "vulnerability_report": {"sha256": "6" * 64},
                 "required_attestations": self.compatibility["release_supply_chain"][
                     "required_attestations"
