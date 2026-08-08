@@ -562,7 +562,7 @@ jobs:
           # asking Docker to resolve the same digest for amd64.
           docker image rm --force "$IMAGE@$DIGEST" >/dev/null 2>&1 || true
           container="$(docker run --platform linux/amd64 -d -p 8000:8000 "$IMAGE@$DIGEST" \
-            start --bind 0.0.0.0:8000 --log none --user root --pass root rocksdb:/data/native-quota)"
+            start --bind 0.0.0.0:8000 --log info --user root --pass root rocksdb:/data/native-quota)"
           capabilities_ready=false
           cleanup() {
             if [ "$capabilities_ready" != "true" ]; then
@@ -574,6 +574,10 @@ jobs:
           trap cleanup EXIT
           deadline=$((SECONDS + 180))
           while [ "$SECONDS" -lt "$deadline" ]; do
+            if ! docker inspect --format='{{.State.Running}}' "$container" 2>/dev/null | grep -q '^true$'; then
+              echo "::error::capability probe container exited before becoming ready"
+              break
+            fi
             if curl --fail --silent --connect-timeout 2 --max-time 5 \
               http://127.0.0.1:8000/capabilities > native-quota-capabilities.json; then
               capabilities_ready=true
