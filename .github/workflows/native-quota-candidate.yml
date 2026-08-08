@@ -533,7 +533,7 @@ jobs:
           REVISION: ${{ needs.source-gate.outputs.manifest_revision }}
         run: |
           set -euo pipefail
-          container="$(docker run -d --rm -p 8000:8000 "$IMAGE@$DIGEST" \
+          container="$(docker run --platform linux/amd64 -d --rm -p 8000:8000 "$IMAGE@$DIGEST" \
             start --log none --user root --pass root rocksdb:/data/native-quota)"
           trap 'docker stop "$container" >/dev/null 2>&1 || true' EXIT
           for _ in $(seq 1 60); do
