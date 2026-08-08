@@ -696,21 +696,43 @@ jobs:
           CI_RUN_URL: ${{ needs.source-gate.outputs.ci_run_url }}
         run: |
           set -euo pipefail
-          python3 scripts/native-quota/release_manifest.py render \
-            --compatibility compatibility/native-quota-v1.json \
-            --capability native-quota-capabilities.json \
-            --artifacts-dir artifacts \
-            --sbom native-quota-image.spdx.json \
-            --provenance native-quota-image.provenance.intoto.jsonl \
-            --image-index native-quota-image.index.json \
-            --vulnerability-report native-quota-image.vulnerabilities.json \
-            --image-signature-verification image-signature-verification.json \
-            --git-sha "$SHA" \
-            --image-digest "$DIGEST" \
-            --repository "$IMAGE" \
-            --source-repository "$GITHUB_REPOSITORY" \
-            --ci-run-url "$CI_RUN_URL" \
+          render_args=(
+            render
+            --compatibility compatibility/native-quota-v1.json
+            --capability native-quota-capabilities.json
+            --artifacts-dir artifacts
+            --sbom native-quota-image.spdx.json
+            --provenance native-quota-image.provenance.intoto.jsonl
+            --vulnerability-report native-quota-image.vulnerabilities.json
+            --image-signature-verification image-signature-verification.json
+            --git-sha "$SHA"
+            --image-digest "$DIGEST"
+            --repository "$IMAGE"
+            --source-repository "$GITHUB_REPOSITORY"
+            --ci-run-url "$CI_RUN_URL"
             --output native-quota-release-candidate.json
+          )
+          if python3 scripts/native-quota/release_manifest.py render --help | grep -q -- '--image-index'; then
+            render_args+=(--image-index native-quota-image.index.json)
+          fi
+          python3 scripts/native-quota/release_manifest.py "${render_args[@]}"
+          platform_digests="$(jq -c '
+            {
+              amd64: ([.manifests[] | select(.platform.os == "linux" and .platform.architecture == "amd64") | .digest] | first),
+              arm64: ([.manifests[] | select(.platform.os == "linux" and .platform.architecture == "arm64") | .digest] | first)
+            }
+          ' native-quota-image.index.json)"
+          index_sha="$(sha256sum native-quota-image.index.json | cut -d' ' -f1)"
+          provenance_sha="$(sha256sum native-quota-image.provenance.intoto.jsonl | cut -d' ' -f1)"
+          jq \
+            --argjson platform_digests "$platform_digests" \
+            --arg index_sha "$index_sha" \
+            --arg provenance_sha "$provenance_sha" \
+            '.image.platform_digests = $platform_digests
+             | .evidence.image_index = {document: "native-quota-image.index.json", sha256: $index_sha}
+             | .evidence.provenance.sha256 = $provenance_sha' \
+            native-quota-release-candidate.json > native-quota-release-candidate.enriched.json
+          mv native-quota-release-candidate.enriched.json native-quota-release-candidate.json
           python3 scripts/native-quota/release_manifest.py verify \
             --candidate native-quota-release-candidate.json \
             --compatibility compatibility/native-quota-v1.json \
