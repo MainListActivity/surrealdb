@@ -561,7 +561,9 @@ jobs:
           # the last platform it resolved. Remove that local binding before
           # asking Docker to resolve the same digest for amd64.
           docker image rm --force "$IMAGE@$DIGEST" >/dev/null 2>&1 || true
-          container="$(docker run --platform linux/amd64 -d -p 8000:8000 "$IMAGE@$DIGEST" \
+          container="$(docker run --platform linux/amd64 -d \
+            --tmpfs /data/native-quota:rw,mode=1777 \
+            -p 8000:8000 "$IMAGE@$DIGEST" \
             start --bind 0.0.0.0:8000 --log info --user root --pass root rocksdb:/data/native-quota)"
           capabilities_ready=false
           cleanup() {
