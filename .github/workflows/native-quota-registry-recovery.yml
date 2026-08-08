@@ -47,18 +47,15 @@ jobs:
             sha256:[0-9a-f][0-9a-f]*) ;;
             *) echo "::error::digest must be sha256:<hex>"; exit 1 ;;
           esac
-          digest_tag="sha256-${DIGEST#sha256:}"
           versions="$(gh api --paginate --slurp \
             "users/$OWNER/packages/container/surrealdb-native-quota/versions?per_page=100" | jq 'add')"
-          echo "Available native quota package versions:"
-          jq -c '.[] | {id,name,metadata}' <<<"$versions"
           matches="$(jq -c \
             --arg release "$RELEASE_TAG" \
             --arg sha "$SHA_TAG" \
-            --arg digest_tag "$digest_tag" \
+            --arg digest "$DIGEST" \
             '[.[] | select((.metadata.container.tags // []) | index($release))
               | select((.metadata.container.tags // []) | index($sha))
-              | select((.metadata.container.tags // []) | index($digest_tag))]' <<<"$versions")"
+              | select(.name == $digest)]' <<<"$versions")"
           count="$(jq 'length' <<<"$matches")"
           test "$count" -eq 1 || {
             echo "::error::expected exactly one package version for the supplied tags and digest, found $count"
