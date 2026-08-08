@@ -507,11 +507,69 @@ jobs:
           artifact-name: native-quota-image-sbom
           upload-artifact: false
 
-      - name: Download BuildKit provenance
+      - name: Capture OCI index and BuildKit provenance
         env:
+          GHCR_TOKEN: ${{ github.token }}
+          GHCR_ACTOR: ${{ github.actor }}
           IMAGE: ${{ needs.source-gate.outputs.image_repository }}
           DIGEST: ${{ steps.final-image.outputs.digest }}
-        run: cosign download attestation "$IMAGE@$DIGEST" > native-quota-image.provenance.intoto.jsonl
+        run: |
+          set -euo pipefail
+          repository="${IMAGE#ghcr.io/}"
+          registry_token="$(curl --fail --silent --show-error \
+            --user "$GHCR_ACTOR:$GHCR_TOKEN" \
+            "https://ghcr.io/token?service=ghcr.io&scope=repository:${repository}:pull" | jq -er .token)"
+          auth_header="Authorization: Bearer $registry_token"
+          index_url="https://ghcr.io/v2/${repository}/manifests/${DIGEST}"
+          curl --fail --silent --show-error \
+            -H "$auth_header" \
+            -H 'Accept: application/vnd.oci.image.index.v1+json' \
+            "$index_url" > native-quota-image.index.json
+          jq -e '
+            [.manifests[] | select(
+              .platform.os == "linux"
+              and (.platform.architecture == "amd64" or .platform.architecture == "arm64")
+            )]
+            | (length == 2 and ([.[].platform.architecture] | sort == ["amd64", "arm64"]))
+          ' native-quota-image.index.json >/dev/null
+
+          : > native-quota-image.provenance.intoto.jsonl
+          while IFS=$'\t' read -r architecture platform_digest; do
+            attestation_digest="$(jq -er \
+              --arg platform_digest "$platform_digest" \
+              '.manifests[]
+               | select(
+                   (.annotations["vnd.docker.reference.type"]? // "") == "attestation-manifest"
+                   and .annotations["vnd.docker.reference.digest"] == $platform_digest
+                 )
+               | .digest' native-quota-image.index.json)"
+            attestation_manifest="$(curl --fail --silent --show-error \
+              -H "$auth_header" \
+              -H 'Accept: application/vnd.oci.image.manifest.v1+json' \
+              "https://ghcr.io/v2/${repository}/manifests/${attestation_digest}")"
+            provenance_digest="$(jq -er '
+              [.layers[] | select(.annotations["in-toto.io/predicate-type"] == "https://slsa.dev/provenance/v1")]
+              | if length == 1 then .[0].digest else error("expected one SLSA provenance layer") end
+            ' <<< "$attestation_manifest")"
+            provenance_statement_file="$(mktemp)"
+            curl --fail --silent --show-error \
+              -H "$auth_header" \
+              "https://ghcr.io/v2/${repository}/blobs/${provenance_digest}" \
+              -o "$provenance_statement_file"
+            jq -e \
+              --arg platform_digest "${platform_digest#sha256:}" \
+              '(.predicateType | contains("slsa.dev/provenance"))
+               and any(.subject[]?; .digest.sha256 == $platform_digest)' \
+              "$provenance_statement_file" >/dev/null
+            cat "$provenance_statement_file" >> native-quota-image.provenance.intoto.jsonl
+            printf '\n' >> native-quota-image.provenance.intoto.jsonl
+            rm -f "$provenance_statement_file"
+            echo "captured SLSA provenance for $architecture $platform_digest"
+          done < <(
+            jq -r '.manifests[]
+              | select(.platform.os == "linux" and (.platform.architecture == "amd64" or .platform.architecture == "arm64"))
+              | [.platform.architecture, .digest] | @tsv' native-quota-image.index.json
+          )
 
       - name: Scan immutable image
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
@@ -644,6 +702,7 @@ jobs:
             --artifacts-dir artifacts \
             --sbom native-quota-image.spdx.json \
             --provenance native-quota-image.provenance.intoto.jsonl \
+            --image-index native-quota-image.index.json \
             --vulnerability-report native-quota-image.vulnerabilities.json \
             --image-signature-verification image-signature-verification.json \
             --git-sha "$SHA" \
@@ -713,6 +772,7 @@ jobs:
             native-quota-capabilities.json \
             native-quota-image.spdx.json \
             native-quota-image.provenance.intoto.jsonl \
+            native-quota-image.index.json \
             native-quota-image.vulnerabilities.json \
             image-signature-verification.json \
             surreal-native-quota.linux-*.tgz \
@@ -730,6 +790,7 @@ jobs:
             native-quota-capabilities.json
             native-quota-image.spdx.json
             native-quota-image.provenance.intoto.jsonl
+            native-quota-image.index.json
             native-quota-image.vulnerabilities.json
             image-signature-verification.json
             surreal-native-quota.linux-*.tgz
