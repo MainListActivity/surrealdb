@@ -50,6 +50,8 @@ jobs:
           digest_tag="sha256-${DIGEST#sha256:}"
           versions="$(gh api --paginate --slurp \
             "users/$OWNER/packages/container/surrealdb-native-quota/versions?per_page=100" | jq 'add')"
+          echo "Available native quota package versions:"
+          jq -c '.[] | {id,name,metadata}' <<<"$versions"
           matches="$(jq -c \
             --arg release "$RELEASE_TAG" \
             --arg sha "$SHA_TAG" \
