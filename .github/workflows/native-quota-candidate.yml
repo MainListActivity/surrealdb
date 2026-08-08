@@ -372,6 +372,7 @@ jobs:
           RELEASE: ${{ needs.source-gate.outputs.release }}
           SHA: ${{ needs.source-gate.outputs.git_sha }}
           CANDIDATE_TAG: ${{ needs.source-gate.outputs.candidate_tag }}
+          CANDIDATE_IMAGE_TAG: candidate-${{ needs.source-gate.outputs.git_sha }}
         run: |
           set -euo pipefail
           if gh release view "$CANDIDATE_TAG" >/dev/null 2>&1; then
@@ -394,10 +395,18 @@ jobs:
               exit 1
             }
             echo "reuse=true" >> "$GITHUB_OUTPUT"
+            echo "fixed_reuse=true" >> "$GITHUB_OUTPUT"
             echo "digest=$release_digest" >> "$GITHUB_OUTPUT"
             echo "Reusing already-built immutable digest $release_digest after an interrupted candidate run."
+          elif docker buildx imagetools inspect "$IMAGE:$CANDIDATE_IMAGE_TAG" >/dev/null 2>&1; then
+            candidate_digest="sha256:$(docker buildx imagetools inspect "$IMAGE:$CANDIDATE_IMAGE_TAG" --raw | sha256sum | cut -d' ' -f1)"
+            echo "reuse=true" >> "$GITHUB_OUTPUT"
+            echo "fixed_reuse=false" >> "$GITHUB_OUTPUT"
+            echo "digest=$candidate_digest" >> "$GITHUB_OUTPUT"
+            echo "Reusing candidate image $IMAGE:$CANDIDATE_IMAGE_TAG after an interrupted validation run."
           else
             echo "reuse=false" >> "$GITHUB_OUTPUT"
+            echo "fixed_reuse=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Build and push image exactly once
@@ -414,8 +423,7 @@ jobs:
           sbom: true
           provenance: mode=max
           tags: |
-            ${{ needs.source-gate.outputs.image_repository }}:${{ needs.source-gate.outputs.release }}
-            ${{ needs.source-gate.outputs.image_repository }}:sha-${{ needs.source-gate.outputs.git_sha }}
+            ${{ needs.source-gate.outputs.image_repository }}:candidate-${{ needs.source-gate.outputs.git_sha }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ needs.source-gate.outputs.git_sha }}
@@ -601,6 +609,36 @@ jobs:
           cosign sign-blob --yes \
             --bundle native-quota-release-candidate.sigstore.json \
             native-quota-release-candidate.json
+
+      - name: Publish immutable image tags after validation
+        env:
+          IMAGE: ${{ needs.source-gate.outputs.image_repository }}
+          RELEASE: ${{ needs.source-gate.outputs.release }}
+          SHA: ${{ needs.source-gate.outputs.git_sha }}
+          DIGEST: ${{ steps.final-image.outputs.digest }}
+          FIXED_REUSE: ${{ steps.immutable.outputs.fixed_reuse }}
+        run: |
+          set -euo pipefail
+          if [ "$FIXED_REUSE" = "true" ]; then
+            echo "Immutable release and SHA tags were already present; leaving them unchanged."
+            exit 0
+          fi
+          release_exists=false
+          sha_exists=false
+          docker buildx imagetools inspect "$IMAGE:$RELEASE" >/dev/null 2>&1 && release_exists=true
+          docker buildx imagetools inspect "$IMAGE:sha-$SHA" >/dev/null 2>&1 && sha_exists=true
+          if [ "$release_exists" = "true" ] || [ "$sha_exists" = "true" ]; then
+            echo "::error::immutable release or SHA tag appeared during validation"
+            exit 1
+          fi
+          docker buildx imagetools create \
+            --tag "$IMAGE:$RELEASE" \
+            --tag "$IMAGE:sha-$SHA" \
+            "$IMAGE@$DIGEST"
+          release_digest="sha256:$(docker buildx imagetools inspect "$IMAGE:$RELEASE" --raw | sha256sum | cut -d' ' -f1)"
+          sha_digest="sha256:$(docker buildx imagetools inspect "$IMAGE:sha-$SHA" --raw | sha256sum | cut -d' ' -f1)"
+          test "$release_digest" = "$DIGEST"
+          test "$sha_digest" = "$DIGEST"
 
       - name: Publish signed GitHub pre-release last
         env:
