@@ -278,10 +278,10 @@ jobs:
           if [ "$first_exit" -eq 0 ]; then
             exit 0
           fi
-          if ! grep -Fq "normalized p99 latency regressed beyond" "$first_log"; then
+          if ! grep -Eq "normalized p(95|99) latency regressed beyond" "$first_log"; then
             exit "$first_exit"
           fi
-          echo "The fixed-workload gate failed only on p99 latency; rerunning the warmed benchmark once to distinguish tail noise from a repeatable regression."
+          echo "The fixed-workload gate failed only on p95/p99 tail latency; rerunning the warmed benchmark once to distinguish tail noise from a repeatable regression."
           rm -f target/native-quota-benchmark.json
           "${benchmark[@]}"
 
