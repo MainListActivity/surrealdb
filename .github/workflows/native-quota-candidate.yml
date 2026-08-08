@@ -553,6 +553,7 @@ jobs:
             ' <<< "$attestation_manifest")"
             provenance_statement_file="$(mktemp)"
             curl --fail --silent --show-error \
+              -L \
               -H "$auth_header" \
               "https://ghcr.io/v2/${repository}/blobs/${provenance_digest}" \
               -o "$provenance_statement_file"
