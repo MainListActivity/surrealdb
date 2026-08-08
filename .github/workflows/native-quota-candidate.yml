@@ -550,6 +550,10 @@ jobs:
           REVISION: ${{ needs.source-gate.outputs.manifest_revision }}
         run: |
           set -euo pipefail
+          # The multi-architecture smoke leaves the canonical digest bound to
+          # the last platform it resolved. Remove that local binding before
+          # asking Docker to resolve the same digest for amd64.
+          docker image rm --force "$IMAGE@$DIGEST" >/dev/null 2>&1 || true
           container="$(docker run --platform linux/amd64 -d --rm -p 8000:8000 "$IMAGE@$DIGEST" \
             start --log none --user root --pass root rocksdb:/data/native-quota)"
           trap 'docker stop "$container" >/dev/null 2>&1 || true' EXIT
