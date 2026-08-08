@@ -562,12 +562,26 @@ jobs:
           # asking Docker to resolve the same digest for amd64.
           docker image rm --force "$IMAGE@$DIGEST" >/dev/null 2>&1 || true
           container="$(docker run --platform linux/amd64 -d --rm -p 8000:8000 "$IMAGE@$DIGEST" \
-            start --log none --user root --pass root rocksdb:/data/native-quota)"
-          trap 'docker stop "$container" >/dev/null 2>&1 || true' EXIT
-          for _ in $(seq 1 60); do
-            curl --fail --silent http://127.0.0.1:8000/capabilities > native-quota-capabilities.json && break
+            start --bind 0.0.0.0:8000 --log none --user root --pass root rocksdb:/data/native-quota)"
+          capabilities_ready=false
+          cleanup() {
+            if [ "$capabilities_ready" != "true" ]; then
+              docker logs "$container" || true
+            fi
+            docker stop "$container" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          for _ in $(seq 1 180); do
+            if curl --fail --silent http://127.0.0.1:8000/capabilities > native-quota-capabilities.json; then
+              capabilities_ready=true
+              break
+            fi
             sleep 1
           done
+          test "$capabilities_ready" = "true" || {
+            echo "::error::capability endpoint did not become ready within 180 seconds"
+            exit 1
+          }
           jq -e \
             --arg release "$RELEASE" \
             --arg sha "$SHA" \
