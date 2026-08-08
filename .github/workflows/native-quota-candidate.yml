@@ -572,7 +572,8 @@ jobs:
             docker rm -f "$container" >/dev/null 2>&1 || true
           }
           trap cleanup EXIT
-          for _ in $(seq 1 180); do
+          deadline=$((SECONDS + 180))
+          while [ "$SECONDS" -lt "$deadline" ]; do
             if curl --fail --silent --connect-timeout 2 --max-time 5 \
               http://127.0.0.1:8000/capabilities > native-quota-capabilities.json; then
               capabilities_ready=true
