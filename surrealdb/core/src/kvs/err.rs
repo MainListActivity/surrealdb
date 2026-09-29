@@ -151,33 +151,67 @@ impl From<indxdb::Error> for Error {
 }
 
 #[cfg(feature = "kv-tikv")]
+const TIKV_TARGET: &str = "surrealdb::core::kvs::tikv";
+
+/// Classifies a `tikv::Error::KeyError` into the matching kvs error. The
+/// caller must only pass a `KeyError` variant; other variants map to a
+/// generic transaction error.
+#[cfg(feature = "kv-tikv")]
+fn from_key_error_ref(e: &tikv::Error) -> Error {
+	let tikv::Error::KeyError(ke) = e else {
+		return Error::Transaction(e.to_string());
+	};
+	if let Some(conflict) = &ke.conflict {
+		use crate::key::debug::Sprintable;
+		Error::TransactionConflict(conflict.key.sprint())
+	} else if ke.already_exist.is_some() {
+		Error::TransactionKeyAlreadyExists
+	} else if ke.abort.contains("KeyTooLarge") {
+		Error::TransactionKeyTooLarge
+	} else {
+		// Preserve aborts and retryable flags at debug-level so
+		// operators can correlate generic transaction errors
+		// back to the underlying TiKV cause without inflating
+		// the error variant surface.
+		tracing::debug!(
+			target: TIKV_TARGET,
+			abort = %ke.abort,
+			retryable = ke.retryable,
+			"TiKV KeyError",
+		);
+		Error::Transaction(e.to_string())
+	}
+}
+
+#[cfg(feature = "kv-tikv")]
 impl From<tikv::Error> for Error {
 	fn from(e: tikv::Error) -> Error {
-		const TIKV_TARGET: &str = "surrealdb::core::kvs::tikv";
 		match e {
 			tikv::Error::DuplicateKeyInsertion => Error::TransactionKeyAlreadyExists,
 			tikv::Error::Grpc(_) => Error::ConnectionFailed(e.to_string()),
-			tikv::Error::KeyError(ref ke) => {
-				if let Some(conflict) = &ke.conflict {
-					use crate::key::debug::Sprintable;
-					Error::TransactionConflict(conflict.key.sprint())
-				} else if ke.already_exist.is_some() {
-					Error::TransactionKeyAlreadyExists
-				} else if ke.abort.contains("KeyTooLarge") {
-					Error::TransactionKeyTooLarge
-				} else {
-					// Preserve aborts and retryable flags at debug-level so
-					// operators can correlate generic transaction errors
-					// back to the underlying TiKV cause without inflating
-					// the error variant surface.
-					tracing::debug!(
-						target: TIKV_TARGET,
-						abort = %ke.abort,
-						retryable = ke.retryable,
-						"TiKV KeyError",
-					);
-					Error::Transaction(e.to_string())
+			tikv::Error::KeyError(_) => from_key_error_ref(&e),
+			tikv::Error::MultipleKeyErrors(ref errors)
+			| tikv::Error::ExtractedErrors(ref errors) => {
+				// A batched commit can surface several per-key errors at
+				// once and the transaction fails as a whole, so classify
+				// the batch by its first matching KeyError: any write
+				// conflict makes it a retryable conflict, otherwise a
+				// duplicate insertion makes it a key-exists error.
+				let mut key_exists = false;
+				for inner in errors {
+					if let tikv::Error::KeyError(_) = inner {
+						match from_key_error_ref(inner) {
+							err @ Error::TransactionConflict(_) => return err,
+							err @ Error::TransactionKeyTooLarge => return err,
+							Error::TransactionKeyAlreadyExists => key_exists = true,
+							_ => {}
+						}
+					}
 				}
+				if key_exists {
+					return Error::TransactionKeyAlreadyExists;
+				}
+				Error::Transaction(e.to_string())
 			}
 			tikv::Error::RegionError(ref re) => {
 				// Most region errors carry a region id in their nested
