@@ -417,7 +417,12 @@ impl Transactable for Transaction {
 			let mut inner = self.inner.write().await;
 			let validation_key = key.clone();
 			// Set the key if empty
-			inner.put(key, val)?;
+			// `put` checks the base store directly and would reject a key deleted
+			// earlier in this transaction; the current view must decide existence.
+			match inner.get(&key)? {
+				None => inner.set(key, val)?,
+				_ => return Err(Error::TransactionKeyAlreadyExists),
+			}
 			self.commit_validation.lock().await.register_conditional(validation_key, None);
 			// Return result
 			Ok(())
