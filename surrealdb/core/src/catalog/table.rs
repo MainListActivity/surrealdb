@@ -60,7 +60,7 @@ impl revision::WalkRevisioned for TableId {
 	}
 }
 
-#[revisioned(revision = 2)]
+#[revisioned(revision = 3)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct TableDefinition {
 	pub(crate) namespace_id: NamespaceId,
@@ -83,6 +83,14 @@ pub struct TableDefinition {
 	pub(crate) cache_tables_ts: Uuid,
 	/// The last time that a DEFINE INDEX was added to this table
 	pub(crate) cache_indexes_ts: Uuid,
+
+	/// The last time the set of LIVE queries on this table changed (a LIVE was
+	/// registered or a KILL removed one). Introduced by SurrealDB 3.2.x for
+	/// live-query cache invalidation; retained at the same wire position so
+	/// datastores written by vanilla 3.2.x binaries remain readable. Tables
+	/// stored by older binaries default to the nil UUID.
+	#[revision(start = 3)]
+	pub(crate) cache_lives_ts: Uuid,
 
 	/// Optional alias used as the GraphQL type / query / mutation prefix for
 	/// this table. See GitHub issue #4537. `Option<String>::default()` is
@@ -122,6 +130,7 @@ impl TableDefinition {
 			cache_events_ts: now,
 			cache_tables_ts: now,
 			cache_indexes_ts: now,
+			cache_lives_ts: now,
 			graphql_alias: None,
 			graphql_deprecated: None,
 		}

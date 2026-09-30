@@ -41,7 +41,10 @@ jobs:
 
   build:
     name: Build binary (amd64)
-    runs-on: runner-amd-16-cores-spot
+    # ci.yml-style fallback: the org's self-hosted runners only exist on the
+    # upstream repo; on forks use a GitHub-hosted amd64 runner so this doesn't
+    # queue forever.
+    runs-on: ${{ github.repository == 'surrealdb/surrealdb' && 'runner-amd-16-cores-spot' || 'ubuntu-24.04' }}
     steps:
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # (Actions must be pinned by commit hash) v6.0.2
@@ -173,7 +176,7 @@ jobs:
           fi
 
       - name: Run Golang tests (${{ matrix.protocol }})
-        timeout-minutes: 5
+        timeout-minutes: ${{ github.repository == 'surrealdb/surrealdb' && 5 || 30 }}
         run: go test -v -cover ./...
         env:
           SURREALDB_URL: ${{ matrix.protocol }}://localhost:8000/rpc
@@ -242,7 +245,7 @@ jobs:
         run: uv sync --group dev
 
       - name: Run Python tests (${{ matrix.protocol }})
-        timeout-minutes: 5
+        timeout-minutes: ${{ github.repository == 'surrealdb/surrealdb' && 5 || 30 }}
         run: uv run pytest --ignore=tests/unit_tests/connections/embedded
         env:
           PYTHONPATH: ./src
@@ -306,7 +309,7 @@ jobs:
           fi
 
       - name: Run PHP tests
-        timeout-minutes: 5
+        timeout-minutes: ${{ github.repository == 'surrealdb/surrealdb' && 5 || 30 }}
         continue-on-error: true
         run: composer test
 
@@ -371,7 +374,7 @@ jobs:
           fi
 
       - name: Run .NET tests
-        timeout-minutes: 5
+        timeout-minutes: ${{ github.repository == 'surrealdb/surrealdb' && 5 || 30 }}
         continue-on-error: true
         run: >
           dotnet run
@@ -380,7 +383,7 @@ jobs:
           --no-build
 
       - name: Run .NET tests (Live Query)
-        timeout-minutes: 5
+        timeout-minutes: ${{ github.repository == 'surrealdb/surrealdb' && 5 || 30 }}
         continue-on-error: true
         run: >
           dotnet run

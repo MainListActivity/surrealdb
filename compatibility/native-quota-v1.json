@@ -121,12 +121,21 @@
     },
     {
       "name": "tikv",
-      "hard_quota_certified": false,
-      "production": false,
-      "persistent_restart_certified": false,
-      "certification_revision": null,
-      "contract_suite": [],
-      "network_fault_model": "pending"
+      "hard_quota_certified": true,
+      "production": true,
+      "persistent_restart_certified": true,
+      "certification_revision": "native-quota-contract-v1",
+      "contract_suite": [
+        "transaction-contention",
+        "conflict-retry",
+        "multi-node",
+        "atomic-fault-injection",
+        "commit-outcome-unknown",
+        "policy-generation-race",
+        "rebuild-epoch",
+        "persistent-restart"
+      ],
+      "network_fault_model": "optimistic-write-conflict-and-commit-outcome-unknown"
     },
     {
       "name": "indxdb",
