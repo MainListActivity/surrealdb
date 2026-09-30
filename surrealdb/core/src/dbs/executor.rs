@@ -1099,6 +1099,10 @@ impl Executor {
 				.is_some_and(|err| matches!(err, Error::QuotaConflict));
 			if quota_conflict {
 				let _ = txn.cancel().await;
+				// Dropping this attempt's receiver closes the channel the
+				// installed broker sends on; clear it so the next attempt
+				// installs a fresh broker and its live notifications deliver.
+				self.clear_broker();
 				attempt += 1;
 				if attempt >= MAX_QUOTA_CONFLICT_ATTEMPTS {
 					match exec_result {
@@ -1124,6 +1128,7 @@ impl Executor {
 						if e.downcast_ref::<Error>()
 							.is_some_and(|err| matches!(err, Error::QuotaConflict))
 						{
+							self.clear_broker();
 							attempt += 1;
 							if attempt >= MAX_QUOTA_CONFLICT_ATTEMPTS {
 								bail!(e);
