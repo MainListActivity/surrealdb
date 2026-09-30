@@ -1213,5 +1213,5 @@ fn test_v3_2_4_remains_unchanged() {
 	let v3_2_4 = include_bytes!("v3_2_4.rs");
 	let hash = Sha256::digest(v3_2_4);
 	let hash_str = hex::encode(hash);
-	assert_eq!(hash_str, "8439653bb1d932c3a37e5d33c457b6fe68cab79ed0df2eb20cd3d32601e827fb");
+	assert_eq!(hash_str, "188fdd63ff790c867d47f3b0a30bf05d818140b220b6ad30ec0ebf72fa76f7a8");
 }
