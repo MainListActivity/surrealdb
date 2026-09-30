@@ -176,7 +176,7 @@ jobs:
           fi
 
       - name: Run Golang tests (${{ matrix.protocol }})
-        timeout-minutes: 5
+        timeout-minutes: ${{ github.repository == 'surrealdb/surrealdb' && 5 || 30 }}
         run: go test -v -cover ./...
         env:
           SURREALDB_URL: ${{ matrix.protocol }}://localhost:8000/rpc
@@ -245,7 +245,7 @@ jobs:
         run: uv sync --group dev
 
       - name: Run Python tests (${{ matrix.protocol }})
-        timeout-minutes: 5
+        timeout-minutes: ${{ github.repository == 'surrealdb/surrealdb' && 5 || 30 }}
         run: uv run pytest --ignore=tests/unit_tests/connections/embedded
         env:
           PYTHONPATH: ./src
@@ -309,7 +309,7 @@ jobs:
           fi
 
       - name: Run PHP tests
-        timeout-minutes: 5
+        timeout-minutes: ${{ github.repository == 'surrealdb/surrealdb' && 5 || 30 }}
         continue-on-error: true
         run: composer test
 
@@ -374,7 +374,7 @@ jobs:
           fi
 
       - name: Run .NET tests
-        timeout-minutes: 5
+        timeout-minutes: ${{ github.repository == 'surrealdb/surrealdb' && 5 || 30 }}
         continue-on-error: true
         run: >
           dotnet run
@@ -383,7 +383,7 @@ jobs:
           --no-build
 
       - name: Run .NET tests (Live Query)
-        timeout-minutes: 5
+        timeout-minutes: ${{ github.repository == 'surrealdb/surrealdb' && 5 || 30 }}
         continue-on-error: true
         run: >
           dotnet run
