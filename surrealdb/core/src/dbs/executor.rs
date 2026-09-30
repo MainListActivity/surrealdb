@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use anyhow::{Result, anyhow, bail};
 use futures::{Stream, StreamExt};
+use rand::Rng;
 use reblessive::TreeStack;
 use surrealdb_types::{Error as TypesError, QueryError, ToSql};
 #[cfg(not(target_family = "wasm"))]
@@ -1038,74 +1039,123 @@ impl Executor {
 		start: &Instant,
 		plan: TopLevelExpr,
 	) -> Result<Value> {
-		let transaction_type = if plan.read_only() {
-			TransactionType::Read
-		} else {
-			TransactionType::Write
+		// A write transaction that flushes quota admission fences serializes on
+		// the database's shared counter keys, so under concurrency its commit can
+		// lose the CAS race and surface `QuotaConflict`. The aborted transaction
+		// committed nothing, so the whole statement is re-executed on a fresh
+		// transaction a bounded number of times before the conflict is reported.
+		// Retries sleep for a randomized interval that grows with the attempt
+		// count, so a burst of conflicting statements does not re-collide in
+		// lockstep.
+		const MAX_QUOTA_CONFLICT_ATTEMPTS: usize = 64;
+		let backoff = |attempt: usize| {
+			let cap = (attempt as u64).min(16);
+			Duration::from_millis(rand::rng().random_range(0..=cap))
 		};
-		let txn = Arc::new(
-			kvs.transaction(transaction_type, LockType::Optimistic)
-				.await?
-				.with_tenant_identity(self.ctx.tenant_identity().cloned()),
-		);
-		let receiver = self.prepare_broker(
-			matches!(transaction_type, TransactionType::Write),
-			kvs.live_query_broker(),
-		);
+		let mut attempt = 0;
+		loop {
+			let transaction_type = if plan.read_only() {
+				TransactionType::Read
+			} else {
+				TransactionType::Write
+			};
+			let txn = Arc::new(
+				kvs.transaction(transaction_type, LockType::Optimistic)
+					.await?
+					.with_tenant_identity(self.ctx.tenant_identity().cloned()),
+			);
+			let receiver = self.prepare_broker(
+				matches!(transaction_type, TransactionType::Write),
+				kvs.live_query_broker(),
+			);
 
-		let exec_result = match kvs.transaction_timeout() {
-			Some(timeout) => {
-				match tokio::time::timeout(
-					timeout,
-					self.execute_plan_in_transaction(Arc::clone(&txn), start, plan),
-				)
-				.await
-				{
-					Ok(res) => res,
-					Err(_) => {
+			let exec_result = match kvs.transaction_timeout() {
+				Some(timeout) => {
+					match tokio::time::timeout(
+						timeout,
+						self.execute_plan_in_transaction(Arc::clone(&txn), start, plan.clone()),
+					)
+					.await
+					{
+						Ok(res) => res,
+						Err(_) => {
+							let _ = txn.cancel().await;
+							bail!(Error::TransactionTimedout(timeout.into()))
+						}
+					}
+				}
+				None => {
+					self.execute_plan_in_transaction(Arc::clone(&txn), start, plan.clone()).await
+				}
+			};
+
+			let quota_conflict = exec_result
+				.as_ref()
+				.err()
+				.and_then(|flow| match flow {
+					ControlFlow::Err(e) => e.downcast_ref::<Error>(),
+					_ => None,
+				})
+				.is_some_and(|err| matches!(err, Error::QuotaConflict));
+			if quota_conflict {
+				let _ = txn.cancel().await;
+				attempt += 1;
+				if attempt >= MAX_QUOTA_CONFLICT_ATTEMPTS {
+					match exec_result {
+						Err(ControlFlow::Err(e)) => bail!(e),
+						_ => bail!(Error::InvalidControlFlow),
+					}
+				}
+				tokio::time::sleep(backoff(attempt)).await;
+				continue;
+			}
+
+			return match exec_result {
+				Ok(value) | Err(ControlFlow::Return(value)) => {
+					// non-writable transactions might return an error on commit.
+					// So cancel them instead. This is fine since a non-writable transaction
+					// has nothing to commit anyway.
+					if let TransactionType::Read = transaction_type {
 						let _ = txn.cancel().await;
-						bail!(Error::TransactionTimedout(timeout.into()))
+						return Ok(value);
 					}
-				}
-			}
-			None => self.execute_plan_in_transaction(Arc::clone(&txn), start, plan).await,
-		};
 
-		match exec_result {
-			Ok(value) | Err(ControlFlow::Return(value)) => {
-				// non-writable transactions might return an error on commit.
-				// So cancel them instead. This is fine since a non-writable transaction
-				// has nothing to commit anyway.
-				if let TransactionType::Read = transaction_type {
+					if let Err(e) = txn.commit().await {
+						if e.downcast_ref::<Error>()
+							.is_some_and(|err| matches!(err, Error::QuotaConflict))
+						{
+							attempt += 1;
+							if attempt >= MAX_QUOTA_CONFLICT_ATTEMPTS {
+								bail!(e);
+							}
+							tokio::time::sleep(backoff(attempt)).await;
+							continue;
+						}
+						if e.downcast_ref::<Error>().is_some_and(Error::is_native_quota) {
+							return Err(e);
+						}
+						bail!(Error::QueryNotExecuted {
+							message: e.to_string(),
+						});
+					}
+
+					// Flush buffered notifications only after the write is durable. Failed commits
+					// and cancelled transactions drop the receiver without delivery.
+					if let Some(prepared) = receiver {
+						Self::flush_live_query_notifications(prepared);
+					}
+
+					Ok(value)
+				}
+				Err(ControlFlow::Continue) | Err(ControlFlow::Break) => {
 					let _ = txn.cancel().await;
-					return Ok(value);
+					bail!(Error::InvalidControlFlow)
 				}
-
-				if let Err(e) = txn.commit().await {
-					if e.downcast_ref::<Error>().is_some_and(Error::is_native_quota) {
-						return Err(e);
-					}
-					bail!(Error::QueryNotExecuted {
-						message: e.to_string(),
-					});
+				Err(ControlFlow::Err(e)) => {
+					let _ = txn.cancel().await;
+					Err(e)
 				}
-
-				// Flush buffered notifications only after the write is durable. Failed commits and
-				// cancelled transactions drop the receiver without delivery.
-				if let Some(prepared) = receiver {
-					Self::flush_live_query_notifications(prepared);
-				}
-
-				Ok(value)
-			}
-			Err(ControlFlow::Continue) | Err(ControlFlow::Break) => {
-				let _ = txn.cancel().await;
-				bail!(Error::InvalidControlFlow)
-			}
-			Err(ControlFlow::Err(e)) => {
-				let _ = txn.cancel().await;
-				Err(e)
-			}
+			};
 		}
 	}
 
