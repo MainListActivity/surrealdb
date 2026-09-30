@@ -122,6 +122,10 @@ fn parse_line(lexer: &mut Lexer) -> ParseResult<ParsedLine> {
 	lexer.eat_single_line_whitespace();
 	lexer.advance_span();
 
+	if lexer.is_eof() {
+		return Ok(ParsedLine::Whitespace);
+	}
+
 	let mut span = lexer.current_span();
 	span.len = 1;
 
