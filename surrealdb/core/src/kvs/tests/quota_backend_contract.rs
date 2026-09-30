@@ -475,27 +475,33 @@ pub async fn extended_record_semantics_contract(new_ds: impl CreateDs) {
 
 macro_rules! define_tests {
 	($new_ds:ident) => {
+		// TiKV tests share a disposable cluster, and their factory clears its keyspace.
 		#[tokio::test]
+		#[cfg_attr(feature = "kv-tikv", serial_test::serial)]
 		async fn quota_no_policy_metering_and_regex_contract() {
 			super::quota_backend_contract::no_policy_metering_and_regex_contract($new_ds).await;
 		}
 
 		#[tokio::test(flavor = "multi_thread")]
+		#[cfg_attr(feature = "kv-tikv", serial_test::serial)]
 		async fn quota_multi_node_mixed_contention_contract() {
 			super::quota_backend_contract::multi_node_mixed_contention_contract($new_ds).await;
 		}
 
 		#[tokio::test]
+		#[cfg_attr(feature = "kv-tikv", serial_test::serial)]
 		async fn quota_atomic_fault_and_commit_unknown_contract() {
 			super::quota_backend_contract::atomic_fault_and_commit_unknown_contract($new_ds).await;
 		}
 
 		#[tokio::test]
+		#[cfg_attr(feature = "kv-tikv", serial_test::serial)]
 		async fn quota_generation_and_rebuild_epoch_contract() {
 			super::quota_backend_contract::generation_and_rebuild_epoch_contract($new_ds).await;
 		}
 
 		#[tokio::test]
+		#[cfg_attr(feature = "kv-tikv", serial_test::serial)]
 		async fn quota_extended_record_semantics_contract() {
 			super::quota_backend_contract::extended_record_semantics_contract($new_ds).await;
 		}

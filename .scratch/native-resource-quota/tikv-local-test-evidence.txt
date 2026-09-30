@@ -1,0 +1,56 @@
+TiKV local experiment, 2026-09-30, task 98ba14f2.
+Selected verbatim output; repeated worker panics and compilation lines omitted.
+Source log SHA256 is for audit, not a claim that /tmp survives worktree cleanup.
+No production data, secrets or credentials used.
+
+[first full suite]
+source: /tmp/sck-98ba-cargo-tikv.log
+sha256: a6c63965c4257266ab48966d720e2b3151c6fdcfb2bd3631b2eee94f7b0e899b
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4m 40s
+running 5 tests
+test kvs::tests::tikv::quota_atomic_fault_and_commit_unknown_contract ... ok
+test kvs::tests::tikv::quota_extended_record_semantics_contract ... ok
+test kvs::tests::tikv::quota_generation_and_rebuild_epoch_contract ... ok
+test kvs::tests::tikv::quota_multi_node_mixed_contention_contract ... 
+unexpected mixed contention error: There was a problem with a transaction: Multiple key errors: [KeyError(KeyError { locked: None, retryable: "Error(Txn(Error(Mvcc(Error(WriteConflict { start_ts: TimeStamp(469436146734596169), conflict_start_ts: TimeStamp(469436146734596125), conflict_commit_ts: TimeStamp(469436146734596174), key: [47, 42, 0, 0, 0, 0, 42, 0, 0, 0, 0, 33, 113, 103], primary: [47, 42, 0, 0, 0, 0, 42, 0, 0, 0, 0, 42, 101, 110, 116, 95, 109, 105, 120, 0, 42, 3, 114, 111, 119, 95, 50, 48, 0], reason: Optimistic })))))", abort: "", conflict: Some(WriteConflict { start_ts: 469436146734596169, conflict_ts: 469436146734596125, key: [47, 42, 0, 0, 0, 0, 42, 0, 0, 0, 0, 33, 113, 103], primary: [47, 42, 0, 0, 0, 0, 42, 0, 0, 0, 0, 42, 101, 110, 116, 95, 109, 105, 120, 0, 42, 3, 114, 111, 119, 95, 50, 48, 0], conflict_commit_ts: 469436146734596174, reason: Optimistic }), already_exist: None, deadlock: None, commit_ts_expired: None, txn_not_found: None, commit_ts_too_large: None, assertion_failed: None, primary_mismatch: None })]
+test kvs::tests::tikv::quota_no_policy_metering_and_regex_contract ... ok
+test result: FAILED. 4 passed; 1 failed; 0 ignored; 0 measured; 2817 filtered out; finished in 0.87s
+error: test failed, to rerun pass `-p surrealdb-core --lib`
+
+[isolated contention repeat]
+source: /tmp/sck-98ba-contention-repeat.log
+sha256: c90a6d73a8cf3c5dcbd5ba45255b3c4c2f97dbfcea82778f04981e2659eadbde
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.11s
+running 1 test
+test kvs::tests::tikv::quota_multi_node_mixed_contention_contract ... FAILED
+unexpected mixed contention error: There was a problem with a transaction: Multiple key errors: [KeyError(KeyError { locked: None, retryable: "Error(Txn(Error(Mvcc(Error(WriteConflict { start_ts: TimeStamp(469436189909712906), conflict_start_ts: TimeStamp(469436189909712908), conflict_commit_ts: TimeStamp(469436189909712969), key: [47, 42, 0, 0, 0, 0, 42, 0, 0, 0, 0, 33, 113, 103], primary: [47, 42, 0, 0, 0, 0, 42, 0, 0, 0, 0, 42, 101, 110, 116, 95, 109, 105, 120, 0, 42, 3, 114, 111, 119, 95, 51, 52, 0], reason: Optimistic })))))", abort: "", conflict: Some(WriteConflict { start_ts: 469436189909712906, conflict_ts: 469436189909712908, key: [47, 42, 0, 0, 0, 0, 42, 0, 0, 0, 0, 33, 113, 103], primary: [47, 42, 0, 0, 0, 0, 42, 0, 0, 0, 0, 42, 101, 110, 116, 95, 109, 105, 120, 0, 42, 3, 114, 111, 119, 95, 51, 52, 0], conflict_commit_ts: 469436189909712969, reason: Optimistic }), already_exist: None, deadlock: None, commit_ts_expired: None, txn_not_found: None, commit_ts_too_large: None, assertion_failed: None, primary_mismatch: None })]
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2821 filtered out; finished in 0.35s
+error: test failed, to rerun pass `-p surrealdb-core --lib`
+
+[final suite with serial lock]
+source: /tmp/sck-98ba-cargo-tikv-final.log
+sha256: a590235227c80057012274626b42c7c1ee19e6473e3ced8b67ca7c2be62d67de
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 54.74s
+running 5 tests
+test kvs::tests::tikv::quota_atomic_fault_and_commit_unknown_contract ... ok
+test kvs::tests::tikv::quota_extended_record_semantics_contract ... ok
+test kvs::tests::tikv::quota_generation_and_rebuild_epoch_contract ... ok
+test kvs::tests::tikv::quota_multi_node_mixed_contention_contract ... FAILED
+test kvs::tests::tikv::quota_no_policy_metering_and_regex_contract ... ok
+unexpected mixed contention error: There was a problem with a transaction: Multiple key errors: [KeyError(KeyError { locked: None, retryable: "Error(Txn(Error(Mvcc(Error(WriteConflict { start_ts: TimeStamp(469436244134461452), conflict_start_ts: TimeStamp(469436244134461472), conflict_commit_ts: TimeStamp(469436244134461513), key: [47, 42, 0, 0, 0, 0, 42, 0, 0, 0, 0, 33, 113, 103], primary: [47, 42, 0, 0, 0, 0, 42, 0, 0, 0, 0, 42, 101, 110, 116, 95, 109, 105, 120, 0, 42, 3, 114, 111, 119, 95, 49, 54, 0], reason: Optimistic })))))", abort: "", conflict: Some(WriteConflict { start_ts: 469436244134461452, conflict_ts: 469436244134461472, key: [47, 42, 0, 0, 0, 0, 42, 0, 0, 0, 0, 33, 113, 103], primary: [47, 42, 0, 0, 0, 0, 42, 0, 0, 0, 0, 42, 101, 110, 116, 95, 109, 105, 120, 0, 42, 3, 114, 111, 119, 95, 49, 54, 0], conflict_commit_ts: 469436244134461513, reason: Optimistic }), already_exist: None, deadlock: None, commit_ts_expired: None, txn_not_found: None, commit_ts_too_large: None, assertion_failed: None, primary_mismatch: None })]
+test result: FAILED. 4 passed; 1 failed; 0 ignored; 0 measured; 2817 filtered out; finished in 1.43s
+error: test failed, to rerun pass `-p surrealdb-core --lib`
+
+[format check, exit 0]
+source: /tmp/sck-98ba-fmt-final.log
+sha256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+
+[clippy unavailable, exit 1]
+source: /tmp/sck-98ba-clippy.log
+sha256: 34acd171bb43372618d4576cff6811595741b2491c272ec80e2977a1e05f6ae1
+error: 'cargo-clippy' is not installed for the toolchain 'nightly-2026-05-11-aarch64-apple-darwin'.
+
+[PD stores API, selected fields]
+{"id": 1, "address": "127.0.0.1:20161", "state_name": "Up"}
+{"id": 3, "address": "127.0.0.1:20160", "state_name": "Up"}
+{"id": 2, "address": "127.0.0.1:20162", "state_name": "Up"}
