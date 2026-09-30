@@ -41,7 +41,10 @@ jobs:
 
   build:
     name: Build binary (amd64)
-    runs-on: runner-amd-16-cores-spot
+    # ci.yml-style fallback: the org's self-hosted runners only exist on the
+    # upstream repo; on forks use a GitHub-hosted amd64 runner so this doesn't
+    # queue forever.
+    runs-on: ${{ github.repository == 'surrealdb/surrealdb' && 'runner-amd-16-cores-spot' || 'ubuntu-24.04' }}
     steps:
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # (Actions must be pinned by commit hash) v6.0.2
