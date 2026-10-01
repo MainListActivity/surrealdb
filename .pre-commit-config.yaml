@@ -4,10 +4,10 @@ repos:
     - id: fmt
       name: fmt
       description: Format files with cargo fmt.
-      entry: cargo fmt
+      entry: bash
       language: system
       types: [rust]
-      args: ["--all", "--", "--check"]
+      args: ["-c", "cargo +\"$(cat rust-toolchain.nightly)\" fmt --all -- --check"]
     - id: clippy
       name: clippy
       description: Lint rust sources

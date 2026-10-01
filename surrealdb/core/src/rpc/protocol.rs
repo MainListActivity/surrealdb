@@ -403,7 +403,7 @@ pub trait RpcProtocol {
 
 		// Check permissions with read lock
 		{
-			let session = session_lock.read().await;
+			let session = session_lock.read().await.clone();
 			// Check if the user is allowed to query
 			if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
 				return Err(method_not_allowed(Method::Use.to_string()));
@@ -813,7 +813,7 @@ pub trait RpcProtocol {
 		session_id: Uuid,
 	) -> Result<DbResult, surrealdb_types::Error> {
 		let session_lock = self.get_session(&session_id)?;
-		let session = session_lock.read().await;
+		let session = session_lock.read().await.clone();
 		let vars = Some(session.variables.clone());
 		let mut res = self.kvs().execute("SELECT * FROM $auth", &session, vars).await?;
 
@@ -836,7 +836,7 @@ pub trait RpcProtocol {
 
 		// Check permissions with read lock
 		{
-			let session = session_lock.read().await;
+			let session = session_lock.read().await.clone();
 			// Check if the user is allowed to query
 			if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
 				return Err(method_not_allowed(Method::Set.to_string()));
@@ -878,7 +878,7 @@ pub trait RpcProtocol {
 
 		// Check permissions with read lock
 		{
-			let session = session_lock.read().await;
+			let session = session_lock.read().await.clone();
 			// Check if the user is allowed to query
 			if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
 				return Err(method_not_allowed(Method::Unset.to_string()));
@@ -908,7 +908,7 @@ pub trait RpcProtocol {
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
 		let session_lock = self.get_session(&session_id)?;
-		let session = session_lock.read().await;
+		let session = session_lock.read().await.clone();
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
 			return Err(method_not_allowed(Method::Kill.to_string()));
@@ -940,7 +940,7 @@ pub trait RpcProtocol {
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
 		let session_lock = self.get_session(&session_id)?;
-		let session = session_lock.read().await;
+		let session = session_lock.read().await.clone();
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
 			return Err(method_not_allowed(Method::Live.to_string()));
@@ -994,7 +994,7 @@ pub trait RpcProtocol {
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
 		let session_lock = self.get_session(&session_id)?;
-		let session = session_lock.read().await;
+		let session = session_lock.read().await.clone();
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
 			return Err(method_not_allowed(Method::Select.to_string()));
@@ -1059,7 +1059,7 @@ pub trait RpcProtocol {
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
 		let session_lock = self.get_session(&session_id)?;
-		let session = session_lock.read().await;
+		let session = session_lock.read().await.clone();
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
 			return Err(method_not_allowed(Method::Insert.to_string()));
@@ -1104,7 +1104,7 @@ pub trait RpcProtocol {
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
 		let session_lock = self.get_session(&session_id)?;
-		let session = session_lock.read().await;
+		let session = session_lock.read().await.clone();
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
 			return Err(method_not_allowed(Method::InsertRelation.to_string()));
@@ -1155,7 +1155,7 @@ pub trait RpcProtocol {
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
 		let session_lock = self.get_session(&session_id)?;
-		let session = session_lock.read().await;
+		let session = session_lock.read().await.clone();
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
 			return Err(method_not_allowed(Method::Create.to_string()));
@@ -1209,7 +1209,7 @@ pub trait RpcProtocol {
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
 		let session_lock = self.get_session(&session_id)?;
-		let session = session_lock.read().await;
+		let session = session_lock.read().await.clone();
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
 			return Err(method_not_allowed(Method::Upsert.to_string()));
@@ -1267,7 +1267,7 @@ pub trait RpcProtocol {
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
 		let session_lock = self.get_session(&session_id)?;
-		let session = session_lock.read().await;
+		let session = session_lock.read().await.clone();
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
 			return Err(method_not_allowed(Method::Update.to_string()));
@@ -1322,7 +1322,7 @@ pub trait RpcProtocol {
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
 		let session_lock = self.get_session(&session_id)?;
-		let session = session_lock.read().await;
+		let session = session_lock.read().await.clone();
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
 			return Err(method_not_allowed(Method::Merge.to_string()));
@@ -1376,7 +1376,7 @@ pub trait RpcProtocol {
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
 		let session_lock = self.get_session(&session_id)?;
-		let session = session_lock.read().await;
+		let session = session_lock.read().await.clone();
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
 			return Err(method_not_allowed(Method::Patch.to_string()));
@@ -1441,7 +1441,7 @@ pub trait RpcProtocol {
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
 		let session_lock = self.get_session(&session_id)?;
-		let session = session_lock.read().await;
+		let session = session_lock.read().await.clone();
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
 			return Err(method_not_allowed(Method::Relate.to_string()));
@@ -1499,7 +1499,7 @@ pub trait RpcProtocol {
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
 		let session_lock = self.get_session(&session_id)?;
-		let session = session_lock.read().await;
+		let session = session_lock.read().await.clone();
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
 			return Err(method_not_allowed(Method::Delete.to_string()));
@@ -1555,7 +1555,7 @@ pub trait RpcProtocol {
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
 		let session_lock = self.get_session(&session_id)?;
-		let session = session_lock.read().await;
+		let session = session_lock.read().await.clone();
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
 			return Err(method_not_allowed(Method::Query.to_string()));
@@ -1605,7 +1605,7 @@ pub trait RpcProtocol {
 		#[cfg(feature = "gql")]
 		{
 			let session_lock = self.get_session(&session_id)?;
-			let session = session_lock.read().await;
+			let session = session_lock.read().await.clone();
 			// Check if the user is allowed to query
 			if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
 				return Err(method_not_allowed(Method::Gql.to_string()));
@@ -1678,7 +1678,7 @@ pub trait RpcProtocol {
 			// purely on the query capability for the subject, exactly like the
 			// `query` and `gql` RPC methods.
 			let session_lock = self.get_session(&session_id)?;
-			let session = session_lock.read().await;
+			let session = session_lock.read().await.clone();
 			if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
 				return Err(method_not_allowed(Method::Graphql.to_string()));
 			}
@@ -1740,7 +1740,7 @@ pub trait RpcProtocol {
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
 		let session_lock = self.get_session(&session_id)?;
-		let session = session_lock.read().await;
+		let session = session_lock.read().await.clone();
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
 			return Err(method_not_allowed(Method::Run.to_string()));
@@ -1943,7 +1943,13 @@ where
 	T: RpcProtocol + ?Sized,
 {
 	let session_lock = this.get_session(&session_id).map_err(anyhow::Error::from)?;
-	let session = session_lock.read().await;
+	// Clone the session state under a short-lived read lock instead of holding
+	// the guard. `RwLock<Session>` is write-preferring: a handler keeping a live
+	// read guard across this point deadlocks the moment a session-mutating RPC
+	// (set/use/signin/…) queues a writer on the same session, because every new
+	// read acquisition — including this one — parks behind that writer while
+	// the writer waits on the held read.
+	let session = session_lock.read().await.clone();
 	if !T::LQ_SUPPORT && session.rt {
 		return Err(bad_lq_config().into());
 	}

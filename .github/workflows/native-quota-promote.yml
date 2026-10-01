@@ -304,8 +304,22 @@ jobs:
           RELEASE: ${{ needs.verify.outputs.release }}
         run: |
           set -euo pipefail
+          image_index="$(mktemp)"
+          docker buildx imagetools inspect "$IMAGE_REFERENCE" --raw > "$image_index"
+          repository="${IMAGE_REFERENCE%@*}"
           for platform in linux/amd64 linux/arm64; do
-            output="$(docker run --rm --platform "$platform" "$IMAGE_REFERENCE" version)"
+            platform_os="${platform%/*}"
+            platform_arch="${platform#*/}"
+            platform_digest="$(jq -er \
+              --arg os "$platform_os" \
+              --arg architecture "$platform_arch" \
+              '[.manifests[]
+                | select(.platform.os == $os and .platform.architecture == $architecture)]
+                | first
+                | .digest' \
+              "$image_index")"
+            platform_reference="${repository}@${platform_digest}"
+            output="$(docker run --rm --platform "$platform" "$platform_reference" version)"
             grep -F "$RELEASE" <<<"$output"
           done
 

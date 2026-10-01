@@ -110,10 +110,34 @@ def find_cli_artifacts(directory: Path) -> list[dict[str, str]]:
     return artifacts
 
 
+def platform_digests_from_index(index: dict[str, Any]) -> dict[str, str]:
+    """Extract the immutable Linux platform manifests from an OCI index."""
+    manifests = index.get("manifests")
+    require(isinstance(manifests, list), "image index lacks manifests")
+    platform_digests: dict[str, str] = {}
+    for manifest in manifests:
+        if not isinstance(manifest, dict):
+            continue
+        platform = manifest.get("platform")
+        if not isinstance(platform, dict):
+            continue
+        if platform.get("os") != "linux" or platform.get("architecture") not in {"amd64", "arm64"}:
+            continue
+        architecture = platform["architecture"]
+        digest = manifest.get("digest")
+        require(isinstance(digest, str) and bool(DIGEST_RE.fullmatch(digest)), "image platform digest is invalid")
+        require(architecture not in platform_digests, "image index contains duplicate platform manifests")
+        platform_digests[architecture] = digest
+    require(set(platform_digests) == {"amd64", "arm64"}, "matching amd64 and arm64 image manifests are required")
+    return platform_digests
+
+
 def render_candidate(args: argparse.Namespace) -> None:
     compatibility = load_json(args.compatibility)
     supply = compatibility_contract(compatibility)
     capability = load_json(args.capability)
+    image_index = load_json(args.image_index)
+    platform_digests = platform_digests_from_index(image_index)
     sha = args.git_sha.lower()
     digest = args.image_digest.lower()
     require(bool(SHA_RE.fullmatch(sha)), "git SHA must be full 40-character lowercase hex")
@@ -159,6 +183,7 @@ def render_candidate(args: argparse.Namespace) -> None:
             "digest": digest,
             "reference": f"{repository}@{digest}",
             "immutable_tags": [release, f"sha-{sha}"],
+            "platform_digests": platform_digests,
             "labels": labels,
         },
         "cli": {
@@ -198,6 +223,10 @@ def render_candidate(args: argparse.Namespace) -> None:
             "provenance": {
                 "document": args.provenance.name,
                 "sha256": file_sha256(args.provenance),
+            },
+            "image_index": {
+                "document": args.image_index.name,
+                "sha256": file_sha256(args.image_index),
             },
             "vulnerability_report": {
                 "document": args.vulnerability_report.name,
@@ -252,6 +281,13 @@ def verify_candidate(
     require(image.get("repository") == supply["image_repository"], "image repository differs")
     require(image.get("reference") == f"{supply['image_repository']}@{digest}", "image reference is not digest-pinned")
     require(image.get("immutable_tags") == [release, f"sha-{sha}"], "immutable tags differ")
+    platform_digests = image.get("platform_digests")
+    require(
+        isinstance(platform_digests, dict)
+        and set(platform_digests) == {"amd64", "arm64"}
+        and all(isinstance(value, str) and bool(DIGEST_RE.fullmatch(value)) for value in platform_digests.values()),
+        "image platform digests are incomplete",
+    )
     labels = image.get("labels", {})
     require(labels.get("org.opencontainers.image.revision") == sha, "image revision label differs")
     require(labels.get("org.opencontainers.image.version") == release, "image version label differs")
@@ -281,6 +317,7 @@ def verify_candidate(
         "image_signature",
         "sbom",
         "provenance",
+        "image_index",
         "vulnerability_report",
     ]:
         evidence_item = evidence.get(evidence_name, {})
@@ -387,6 +424,7 @@ def parser() -> argparse.ArgumentParser:
     render.add_argument("--artifacts-dir", type=Path, required=True)
     render.add_argument("--sbom", type=Path, required=True)
     render.add_argument("--provenance", type=Path, required=True)
+    render.add_argument("--image-index", type=Path, required=True)
     render.add_argument("--vulnerability-report", type=Path, required=True)
     render.add_argument("--image-signature-verification", type=Path, required=True)
     render.add_argument("--git-sha", required=True)
