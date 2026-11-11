@@ -2,6 +2,7 @@
 //! targets remain available for compile diagnostics; this runner avoids
 //! linking the large engine separately for each contract on small builders.
 #![cfg(feature = "kv-mem")]
+#![recursion_limit = "256"]
 
 use surrealdb_catalog as catalog;
 use surrealdb_core::{dbs, kvs};

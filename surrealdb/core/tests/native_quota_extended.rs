@@ -1,6 +1,7 @@
 //! Extended native-quota contracts shared verbatim with the unit suite.
 //! Uses public dependency APIs without widening core's internal visibility.
 #![cfg(feature = "kv-mem")]
+#![recursion_limit = "256"]
 
 use surrealdb_catalog as catalog;
 use surrealdb_core::{dbs, kvs};
