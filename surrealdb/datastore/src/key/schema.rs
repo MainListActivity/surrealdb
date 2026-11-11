@@ -108,6 +108,12 @@ keyspace! {
 	native_quota_migration = ["!nqm"] => Vec<u8>;
 
 	root = ["/"] (format_generic) {
+		/// Closed LIVE event watermark, encoded with the backend's timestamp
+		/// codec. Every event-producing transaction locks and advances this key
+		/// atomically with its event rows. A reader uses its own snapshot of it.
+		/// Global because the router advances one cursor across every database.
+		live_event_watermark = ["!lw"] => Vec<u8>;
+
 		/// The full semantic version the datastore has been advanced to.
 		///
 		/// Distinct from the bare `!v` key above, which holds only the major

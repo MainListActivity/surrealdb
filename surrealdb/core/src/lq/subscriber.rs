@@ -1486,10 +1486,9 @@ mod tests {
 	}
 
 	/// A pass between event stamping and storage commit must not advance past
-	/// an event that will become visible later. TiKV's configuration guard does
-	/// not repair the default watermark used by this memory-backed regression.
+	/// an event that will become visible later. The durable event fence must
+	/// remain at its prior committed value until the writer commits.
 	#[tokio::test]
-	#[ignore = "known failure: default safe_timestamp can pass an uncommitted event; pending general watermark protocol"]
 	async fn router_delivers_an_event_committed_after_an_interleaved_pass() {
 		use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -1785,7 +1784,7 @@ mod tests {
 		let tx = ds.transaction(Read).await.unwrap();
 		other
 			.live_query_router()
-			.set_baseline(tx.safe_timestamp().await.unwrap().as_versionstamp());
+			.set_baseline(tx.live_query_watermark().await.unwrap().as_versionstamp());
 		tx.cancel().await.unwrap();
 		let ours = subscribe(&ds, &live).await;
 		let theirs = subscribe(&other, &live).await;

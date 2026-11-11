@@ -41,12 +41,14 @@ const WRITE_COMMIT_BOUND: Duration = Duration::from_secs(50);
 const TARGET: &str = "surrealdb::core::kvs::tikv";
 
 /// TiKV's oracle orders timestamp allocation, not visibility of event keys that
-/// are stamped before their transaction commits. Until the backend has a closed
-/// event watermark tied to the reader's snapshot, Router must fail explicitly.
+/// are stamped before their transaction commits. The datastore now supplies an
+/// atomic event fence, but its homogeneous rollout must be validated before
+/// enabling Router. This backend oracle API itself remains unsafe for tailing.
 fn unsupported_router_watermark() -> Error {
 	Error::Datastore(
 		"TiKV does not support live_query_engine=router: a PD timestamp is not a closed \
-		 LIVE event watermark. Use live_query_engine=inline, or a host-managed external \
+		 LIVE event watermark; the datastore event-fence rollout is not yet enabled. \
+		 Use live_query_engine=inline, or a host-managed external \
 		 engine with its own committed change stream."
 			.into(),
 	)

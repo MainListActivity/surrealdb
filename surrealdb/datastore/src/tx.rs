@@ -89,16 +89,16 @@ use crate::key::schema::{
 	ForeignTablePrefix, FunctionKey, FunctionPrefix, GenerationMarkKey, GraphFoldKey,
 	GraphPointerKey, IdxRoot, IndexBuildShapesKey, IndexCompactionKey, IndexCountKey, IndexDefKey,
 	IndexDefPrefix, IndexNameKey, IndexShapesKey, IndexShapesTrackedKey, LayoutKey, LayoutPrefix,
-	LiveEventsKey, MigrationKey, MigrationRunKey, MigrationRunPrefix, MlModelKey, MlModelPrefix,
-	ModuleKey, ModulePrefix, NamespaceKey, NamespacePrefix, NodeKey, NodePrefix, NodeReleaseKey,
-	NsAccessMethodKey, NsAccessMethodPrefix, NsAccessRoot, NsBucketKey, NsBucketPrefix, NsGrantKey,
-	NsGrantPrefix, NsUserKey, NsUserPrefix, ObjectVersionKey, ParamKey, ParamPrefix, ReclaimKey,
-	ReclaimTbPrefix, RecordKey, RecordPrefix, RootAccessMethodKey, RootAccessMethodPrefix,
-	RootAccessRoot, RootBucketKey, RootBucketPrefix, RootConfigKey, RootGrantKey, RootGrantPrefix,
-	RootUserKey, RootUserPrefix, SequenceKey, SequencePrefix, StoreDefaultsKey, SubscriptionPrefix,
-	TableConformanceKey, TableKey, TableMigrationKey, TableMigrationRequestKey,
-	TableMigrationRequestTbPrefix, TableMigrationsKey, TablePrefix, TermChangeBatchKey,
-	UserTypeKey, UserTypePrefix, VersionKey,
+	LiveEventWatermarkKey, LiveEventsKey, MigrationKey, MigrationRunKey, MigrationRunPrefix,
+	MlModelKey, MlModelPrefix, ModuleKey, ModulePrefix, NamespaceKey, NamespacePrefix, NodeKey,
+	NodePrefix, NodeReleaseKey, NsAccessMethodKey, NsAccessMethodPrefix, NsAccessRoot, NsBucketKey,
+	NsBucketPrefix, NsGrantKey, NsGrantPrefix, NsUserKey, NsUserPrefix, ObjectVersionKey, ParamKey,
+	ParamPrefix, ReclaimKey, ReclaimTbPrefix, RecordKey, RecordPrefix, RootAccessMethodKey,
+	RootAccessMethodPrefix, RootAccessRoot, RootBucketKey, RootBucketPrefix, RootConfigKey,
+	RootGrantKey, RootGrantPrefix, RootUserKey, RootUserPrefix, SequenceKey, SequencePrefix,
+	StoreDefaultsKey, SubscriptionPrefix, TableConformanceKey, TableKey, TableMigrationKey,
+	TableMigrationRequestKey, TableMigrationRequestTbPrefix, TableMigrationsKey, TablePrefix,
+	TermChangeBatchKey, UserTypeKey, UserTypePrefix, VersionKey,
 };
 use crate::key::table_migration::{TableMigrationRequest, TableMigrationState, VerifiedField};
 use crate::layouts::LayoutSet;
@@ -11430,13 +11430,40 @@ impl Transaction {
 		Ok(self.tr.timestamp().await?)
 	}
 
-	/// Get the current safe (closed) watermark timestamp — the versionstamp at or
-	/// below which every committed transaction is final and visible. The
-	/// live-query router uses this so it never advances past a commit that could
-	/// still become visible with a lower versionstamp. Defaults to
-	/// [`Self::timestamp`]; distributed backends override it.
+	/// Ask the backend for its closed watermark, when it provides one.
+	/// A backend defaulting to a fresh timestamp cannot close pre-commit LIVE
+	/// event keys. The router therefore uses [`Self::live_query_watermark`]
+	/// and its atomic event-fence protocol instead.
 	pub async fn safe_timestamp(&self) -> Result<BoxTimeStamp> {
 		Ok(self.tr.safe_timestamp().await?)
+	}
+
+	/// The closed LIVE event watermark visible in this transaction's snapshot.
+	///
+	/// Event-producing transactions advance this key in the same atomic commit
+	/// as their event rows, after a conflict-tracked read of its prior value.
+	/// Thus a later-visible lower-stamped event cannot commit behind this fence.
+	/// A plain snapshot read here is essential: neither a fresh oracle timestamp
+	/// nor a separately opened transaction describes the events this reader sees.
+	/// No fence means no event has committed through this protocol yet; it is
+	/// not a migration guarantee for history written by an older writer.
+	pub async fn live_query_watermark(&self) -> Result<BoxTimeStamp> {
+		// Keep the rollout restriction here as well as in the TiKV provider:
+		// direct-backend builders bypass provider configuration validation.
+		// The fence cannot constrain an older binary which never writes it.
+		if self.kind() == "tikv" {
+			return Err(KvsError::Datastore(
+				"TiKV LIVE Router remains disabled pending a homogeneous event-fence rollout \
+				 and disposable multi-node validation."
+					.into(),
+			)
+			.into());
+		}
+		let stamps = self.timestamp_impl();
+		match self.get_key(&LiveEventWatermarkKey {}, None).await? {
+			Some(bytes) => Ok(stamps.decode(&bytes)?),
+			None => Ok(stamps.earliest()),
+		}
 	}
 
 	/// Returns `true` if the table has at least one durable live-query
@@ -12884,9 +12911,41 @@ impl Transaction {
 		if cf_changes.is_empty() && lqe_changes.is_empty() {
 			return Ok(());
 		}
-		// Both keyspaces share this commit's versionstamp.
+		// Lock the durable LIVE fence in this writer's snapshot before assigning
+		// its event stamp. `getu` promises commit-time validation even on engines
+		// that do not advertise conflict detection for blind writes. If another
+		// event writer commits first, this transaction must retry in a new
+		// snapshot rather than publish an event behind the reader's watermark.
+		let prior_live = if lqe_changes.is_empty() {
+			None
+		} else {
+			self.getu_key(&LiveEventWatermarkKey {}).await?
+		};
+		// Both keyspaces share this commit's versionstamp. The oracle must
+		// advance beyond the persisted fence too, including after a restart or
+		// clock regression; refusing a bad stamp cannot silently lose an event.
+		let stamp = self.timestamp().await?;
+		if !lqe_changes.is_empty() {
+			let stamps = self.timestamp_impl();
+			let previous = match prior_live {
+				Some(prior) => stamps.decode(&prior)?,
+				None => stamps.earliest(),
+			};
+			if stamp.as_versionstamp() <= previous.as_versionstamp() {
+				return Err(KvsError::TimestampInvalid(
+					"LIVE event timestamp did not advance beyond the committed watermark".into(),
+				)
+				.into());
+			}
+		}
 		let buf = &mut [0u8; _];
-		let ts = self.timestamp().await?.encode(buf);
+		let ts = stamp.encode(buf);
+		if !lqe_changes.is_empty() {
+			// This is an ordinary metered, cardinality-guarded write in the
+			// same transaction. Rollback or a failed commit exposes neither
+			// the advanced fence nor any of the event rows below.
+			self.set_key(&LiveEventWatermarkKey {}, &ts.to_vec()).await?;
+		}
 		// Write the buffered changefeed entries. These commit-time writes are
 		// part of the transaction's write set, so they are metered and
 		// checked against the write-cardinality guard like any other write.

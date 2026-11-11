@@ -12,7 +12,8 @@ use crate::{Datastore, unsupported_router_watermark};
 const TARGET: &str = "surrealdb::core::kvs::ds";
 
 /// Refuse an explicitly selected Router before connecting or opening storage.
-/// Direct users of `Datastore` are also protected by `safe_timestamp` itself.
+/// The datastore fence API separately keeps direct-backend Router use disabled
+/// until its homogeneous rollout has been validated.
 fn validate_live_query_engine(config: &ConfigMap) -> Result<()> {
 	let mut engine = String::new();
 	config.parse_key("live_query_engine", &mut engine);

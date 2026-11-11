@@ -10,6 +10,7 @@ Generated from the `keyspace!` schema; do not edit by hand.
 !vf                                                                                                    ForkStorageKey ->  crate::fork_storage::ForkStorageFormat
 !nqm                                                                                          NativeQuotaMigrationKey ->  Vec<u8>
 /                                                                                                            RootRoot ->  (subtree)
+/!lw                                                                                            LiveEventWatermarkKey ->  Vec<u8>
 /!vs                                                                                                StorageVersionKey ->  crate::version::StorageVersion
 /!vh{ts}{nd}                                                                                        VersionHistoryKey ->  crate::version::VersionHistoryEntry
 /!vh                                                                                             VersionHistoryPrefix ->  (range)

@@ -51,8 +51,8 @@ use crate::lq::subscriber::{Replayed, TableReplay};
 /// Per-node live-query router state: the tail cursor over the global
 /// versionstamp space of the `lqe` keyspace, and the lap in progress.
 ///
-/// The cursor is **in-memory** and is initialised to "now" on the first pass so
-/// a freshly started node does not replay retained history to its
+/// The cursor is **in-memory** and is initialised to the committed event fence
+/// before serving queries, so a freshly started node does not replay history to its
 /// currently-connected subscribers — matching the inline engine, which only
 /// notifies writes that occur after a subscription is registered. Durable,
 /// resumable cursors (which let a reconnecting client replay a gap) are the
@@ -233,8 +233,8 @@ impl LiveQueryRouter {
 		*self.lap.lock() = Some(lap);
 	}
 
-	/// Laps found behind the event retention window since the datastore
-	/// started.
+	/// Laps spanning an expired timestamp range since the datastore started.
+	/// Includes ranges left empty by idle periods; this measures risk, not loss.
 	#[cfg(test)]
 	pub(crate) fn laps_behind_retention(&self) -> u64 {
 		self.behind_window.load(Ordering::Relaxed)
@@ -259,14 +259,14 @@ impl LiveQueryRouter {
 /// Run one tail-and-deliver pass for the Router engine.
 ///
 /// A lap delivers every `lqe` event with a versionstamp in `(cursor, W]`, where
-/// `W` is the backend's **safe watermark** (`Transaction::safe_timestamp`) — the
-/// versionstamp at or below which every commit is final and visible. Bounding
-/// delivery and cursor advancement by `W` (rather than by the highest event
+/// `W` is the durable LIVE fence (`Transaction::live_query_watermark`) read in
+/// this pass's snapshot — the stamp through which event commits are final and
+/// visible in that snapshot. Bounding delivery and cursor advancement by `W` (rather than by the highest event
 /// seen) is what makes this correct on a backend whose commit log is non-linear:
 /// the router never advances past a commit that could still become visible later
 /// with a lower versionstamp. A monotonic oracle alone does not supply this
 /// guarantee: pre-commit event stamps and an older read snapshot must both be
-/// accounted for by the backend's watermark protocol.
+/// accounted for by the event-fence protocol.
 ///
 /// A pass spends at most [`LIVE_QUERY_ROUTER_SLICE_BATCHES`] pages' worth of
 /// budget, [`NORMAL_BATCH_SIZE`] a page. An entry holds every change one
@@ -324,9 +324,11 @@ pub(crate) async fn process_bounded(
 	};
 	let _pass = router.pass.lock().await;
 	let txn = Arc::new(ds.transaction(Read).await?);
-	// The safe watermark now: what a lap begun by this pass delivers up to,
-	// and the clock every pass measures the retention window against.
-	let safe_vs = catch!(txn, txn.safe_timestamp().await).as_versionstamp();
+	// The committed LIVE fence bounds delivery in this read snapshot. It may
+	// remain still while no events commit, so retention needs its own fresh
+	// clock; using that clock as the delivery bound would reopen the race.
+	let safe_vs = catch!(txn, txn.live_query_watermark().await).as_versionstamp();
+	let now = catch!(txn, txn.timestamp().await).as_versionstamp();
 	// Continue the lap the previous pass stopped in, or begin one against the
 	// safe watermark: deliver and advance only up to there.
 	let mut lap = match router.take_lap() {
@@ -357,7 +359,7 @@ pub(crate) async fn process_bounded(
 			}
 		}
 	};
-	report_if_behind_window(ds, router, &txn, &mut lap, safe_vs);
+	report_if_behind_window(ds, router, &txn, &mut lap, now);
 	// The lap is kept however the pass ends. A pass that fails keeps it at
 	// the place it reached — the entry, the event and the subscription — so
 	// the next pass continues there: a lap begun again at the cursor would
@@ -403,17 +405,19 @@ pub(crate) async fn process_bounded(
 }
 
 /// Reports `lap` once if the event retention window has passed the cursor it
-/// began after, as of the safe watermark `now` the pass read.
+/// began after, as of the fresh clock `now` the pass read.
 ///
 /// The collector keeps an event for `live_query_retention` from its capture,
 /// on every node, and nothing holds it for a lap: the lap's unreached events
 /// are protected only by the snapshot of the pass that reads them. A lap
 /// begun behind the window, or suspended between passes while the window
-/// passed its cursor, therefore has events it can no longer reach in the
-/// databases it has not finished — every one captured between the cursor and
-/// the window's start — and they are collected before delivery, however the
-/// lap continues. Checked on every pass, since a lap crosses the window
-/// while it waits between passes as readily as it begins behind it; the
+/// passed its cursor, can have events it can no longer reach in unfinished
+/// databases. This is a conservative risk signal, not a count of lost events:
+/// the durable event fence also stays old through an idle period, when the
+/// expired timestamp range may contain no events at all. A last-scan clock
+/// cannot replace the cursor here because a delayed writer can still commit
+/// an already-aged event after that scan. Checked on every pass, since a lap
+/// crosses the window while it waits as readily as it begins behind it; the
 /// comparison is in versionstamps, which is how the collector's cutoff and
 /// the lap's cursor are both minted. A zero retention disables the collector
 /// and so the report.
@@ -441,8 +445,8 @@ fn report_if_behind_window(
 		lap.behind_window = true;
 		router.behind_window.fetch_add(1, Ordering::Relaxed);
 		warn!(
-			"The live-query router on this node is behind the {retention:?} event retention window: \
-			 events captured before the window that its lap has yet to deliver are collected before delivery"
+			"The live-query router cursor precedes the {retention:?} retention window: \
+			 undelivered events may have been collected; this can also occur after an idle period"
 		);
 	}
 }

@@ -1,125 +1,131 @@
-# TiKV LIVE ordering regression and mitigation
+# LIVE ordering protocol and validation handoff
 
 Base: isolated upgrade snapshot `bdf68290d20ee3918d31788ee5125d807b9909de`.
-This change only concerns LIVE ordering and its tests. It does not access a TiKV
-cluster or change production data.
+All work is local source work. No production service or data has been touched.
 
-## Failure mechanism
+## Reproduced failure
 
-`Transaction::store_changes()` stamps LIVE keys before the native commit.
-TiKV previously inherited `safe_timestamp()` from the KVS trait, which calls
-`timestamp()` and obtains a fresh PD TSO. The router opens a transaction first,
-then reads this watermark and advances its cursor after scanning.
+`Transaction::store_changes()` stamps LIVE event keys before the native commit.
+The old router used a fresh `safe_timestamp()` oracle value to advance its cursor.
+That is unsafe in both of these deterministic schedules:
 
-Two schedules violate the required closed-log contract:
+1. A writer stamps event 10 and pauses before commit. A router sees no event,
+   obtains watermark 20 and advances. Event 10 commits below the cursor.
+2. A reader opens snapshot 10. Another transaction commits before the reader
+   obtains watermark 20. The event is invisible in the reader's older snapshot,
+   but its cursor still advances past it.
 
-1. A writer stamps event 10 and pauses before commit. A router snapshot sees no
-   event, obtains watermark 20, and advances. Event 10 commits afterward and is
-   permanently below the cursor.
-2. A router opens snapshot 10. A writer stamps and commits an event after that
-   snapshot but before the router obtains watermark 20. The snapshot cannot see
-   the event, but the cursor still advances past it.
+The upgrade worker ran the first schedule after fixing an independent database
+quota-ledger initialization defect. Its normal-commit control passed. The
+interleaved case retained the event but delivered zero notifications instead of
+one (`live-interleaved-runtime.log`). This is behavioral evidence of the old
+bug; it is not validation of the new protocol.
 
-A transaction-start timestamp only addresses the second schedule. A fixed delay,
-a process-local mutex, or disabling async commit does not establish a distributed
-closed watermark for the first schedule.
+## Atomic event fence
 
-## Containment in this patch
+Every transaction with buffered LIVE events now performs a conflict-tracked
+`getu` of the global `/!lw` key before allocating its event timestamp. The
+new timestamp must strictly exceed the previously committed fence. The same
+native transaction writes that fence and all its LIVE event rows. A failed or
+cancelled transaction publishes neither. The router reads the fence through
+the same snapshot it uses to scan event rows; it never uses a fresh oracle as
+the delivery bound. The startup baseline uses this same committed fence.
 
-- The TiKV provider rejects an explicit Router selection before constructing a
-  client. Its offline test uses an empty endpoint and verifies the specific,
-  non-retryable configuration error, including mixed-case selections.
-- TiKV overrides `safe_timestamp()` with the same explicit error. Direct users
-  of the backend cannot fall back to a fresh PD timestamp. The shared KVS suite
-  replaces TiKV's numeric watermark-success check with an explicit refusal test
-  on the real transaction; it does not silently omit the contract.
-- Baseline establishment and router passes cancel the read transaction if the
-  watermark fails, preserving the original error and the router's cursor/lap.
-- The KVS documentation now requires visibility in the reader's snapshot and
-  excludes future lower-stamped events; it no longer claims a monotonic oracle
-  alone proves safety.
+For a reader that sees fence W, any later successful event writer either sees
+W and must allocate a greater stamp, or uses an older snapshot and conflicts
+with the committed fence. Therefore an event at or below W cannot become
+visible after that reader. `getu` is essential: relying on blind-write conflict
+behavior would not cover every supported backend. Conflicting transactions
+must retry in a new snapshot. A nonadvancing clock fails with TimestampInvalid
+instead of silently losing an event.
 
-Normal startup rejects Router at baseline establishment before startup writes.
-A builder that defers startup still refuses it when the baseline is established;
-this is not a claim that every constructor variant rejects immediately.
+The key is global because each router has one cursor across all databases.
+This adds one read and one write to event-producing transactions and serializes
+successful LIVE event commits, including otherwise unrelated tables/databases.
+Existing transaction retry/error propagation handles conflicts; explicit
+transactions can return a retryable conflict to their caller. Transactions
+without LIVE events do not access the fence. Changefeed-only ordering is not
+changed by this protocol.
 
-This is containment, not an implementation of ordered TiKV Router delivery.
-Inline remains unchanged and is not certified for distributed ordering here.
+An idle fence does not represent current time. Retention reporting continues
+to use a separate fresh timestamp, and subscription capture/registration times
+retain their existing semantics. The behind-retention counter remains a
+conservative risk signal: after startup or idle, an expired cursor range can
+be empty and fresh work can still deliver successfully. The warning now makes
+that explicit. Replacing its reference with last-scan time could hide a delayed
+writer whose event was already aged before committing. This protocol prevents
+cursor loss; it does not make notification transport durable or extend retention.
 
-## Deterministic regression
+## Focused behavioral tests
 
-`lq::subscriber::tests::router_delivers_an_event_committed_after_an_interleaved_pass`
-uses the real in-memory datastore, event buffer, native commit path and router.
-Maintenance tasks are disabled. The existing one-shot `before_commit` hook runs
-a complete router pass after `store_changes()` but before the writer commits.
-The test then proves a LIVE event is retained and requires exactly one delivery
-on the next pass, with no duplicate on another pass. The timeout is a hang
-watchdog, not a probabilistic race generator.
+`surrealdb/core/tests/live_ordering.rs` links the ordinary core library without
+compiling the complete core unit-test suite. It uses an in-memory datastore
+and the public host maintenance API, with every job except Router disabled.
+An observer requires each requested Router pass to report success, completion
+and exactly one execution. No live endpoint is involved.
 
-The default watermark used by the memory backend shares the pre-commit gap.
-Consequently this regression is explicitly ignored as a **known failure**, with
-its correct delivery assertion intact. The TiKV-specific guard does not make it
-pass. It must be run explicitly; an ignored test is not validation. A future
-protocol that makes readers wait for pending writers will need a concurrent
-barrier form of this test rather than running the reader inside the writer hook.
+The tests require:
 
-## Focused integration entry
+- Normal SQL commit delivers the exact subscription, CREATE action and record
+  once, with no duplicate on the next pass.
+- A Router pass forced between event staging and commit processes no event;
+  the later pass delivers the committed event once. This test always runs the
+  normal-commit control first. Neither case is ignored.
+- An old snapshot first asked for its fence after a newer commit still sees
+  its old fence/event set; a fresh snapshot sees both committed events.
+- Two event writers with distinct event keys conflict through the shared
+  fence. The later-stamped winner commits and is routed from inside the older
+  writer's pre-commit hook. The older commit must fail retryably; a fresh
+  retry must deliver its event exactly once.
+- Cancelling after both fence and event writes are staged leaves both unchanged.
+- A deliberately future fence rejects a nonadvancing timestamp and publishes
+  no event.
+- The generated typed keyspace map equals its checked-in snapshot.
 
-`surrealdb/core/tests/live_ordering.rs` runs the same delivery contract in a
-separate `live_ordering` target, linking the ordinary core library without
-compiling all core unit-test modules. It requires `kv-mem`; no additional
-production API or test feature is introduced. The datastore dev dependency
-already enables the one-shot commit hook for integration tests.
-
-Only the Router job is enabled, through the existing public host maintenance
-API. An execution observer requires each pass to report success, no backlog and
-exactly one pass event, preserving the original progress/error assertions. The
-interleaved pass must process zero items. SQL setup and write results, retained
-event count, exact subscription id, exact record id, CREATE action, single
-notification and absence of duplicates are all checked. An uninterrupted-commit
-control exercises this same harness; only the commit interleaving differs.
-The focused interleaved test also runs that control first internally, even when
-selected alone, and does not reach the interleaved scenario unless the entire
-control (including exact delivery, duplicate checks and shutdown) passes.
-
-The upgrade snapshot has a separate database quota-ledger initialization defect
-being fixed by the upgrade worker. A failure in setup or in the normal-commit
-control is **not evidence of LIVE ordering loss**. Require the log marker
-`LIVE ordering control passed; starting interleaved scenario`, then check that
-the later failure is the expected delivery assertion with a retained event.
-Do not bypass quota initialization or weaken the setup assertions to get there.
-
-The reproduction remains explicitly ignored as a known failure. Run the third
-command below to enable it; a default test run that skips it does not validate
-ordering. Scheduler sleeps only wait for a due job while the writer remains
-paused at the hook, so the forced interleaving is deterministic.
+Synthetic events isolate the protocol cases from document quota/write conflicts;
+they use the real buffer, commit, router and subscriber. The two SQL scenarios
+cover the end-to-end path. Commit hooks force the schedules, and timeouts are
+hang watchdogs. Scheduler sleeps only select a due job while the writer remains
+paused. The original core unit regression is also enabled.
 
 ## Validation handoff
 
-The upgrade worker owns the build window. No builds or downloads were performed
-while preparing this patch. Rustfmt parsed the modified Rust files and
-`git diff --check` passed; these are static checks, not compilation or runtime
-test results. These commands operate locally and need no TiKV
-endpoint; never set a production endpoint for any test:
+The upgrade worker owns the build window. This patch has only been checked by
+Rustfmt parsing/formatting and `git diff --check`; no build or runtime success
+is claimed for the new protocol. Integrate it with the worker's quota fix first.
+The old isolated snapshot alone still has the unrelated quota initialization
+bug, so bypassing that setup would invalidate the control.
+
+Run locally using the worker's existing toolchain/cache and disk budget:
 
 ```sh
+cargo test --locked -p surrealdb-core --no-default-features --features kv-mem --test live_ordering -- --nocapture
 cargo test --locked -p surrealdb-kvs-tikv --lib provider::tests
-cargo test --locked -p surrealdb-core --no-default-features --features kv-mem --test live_ordering router_delivers_an_uninterrupted_commit -- --exact --nocapture
-cargo test --locked -p surrealdb-core --no-default-features --features kv-mem --test live_ordering router_delivers_an_event_committed_after_an_interleaved_pass -- --ignored --exact --nocapture
 ```
 
-After the independent quota initialization defect is fixed, expected before a
-general watermark fix: the provider and uninterrupted-commit control commands pass; the explicitly enabled interleaved regression fails at
-the delivery assertion with the retained event present. These are
-expectations from source review, not recorded runtime results. The TiKV live
-conformance suites erase cluster data and are outside this handoff.
+Expected: all focused tests pass, including the exact previously failing
+interleaving. The provider tests are offline configuration tests. This handoff
+does not request the destructive TiKV conformance suites or any production
+endpoint. Broader existing Router retention/GC and two-node ownership tests
+should run when the full core unit-test build is available.
 
-## Requirements for enabling Router
+## TiKV rollout remains blocked
 
-A candidate is a durable feed fence atomically committed with every stamped
-event and read through the router's own snapshot. Write conflicts must prevent
-a delayed writer from committing below an already visible fence. This introduces
-a serialization point and requires explicit retry, crash, unknown-commit,
-retention and upgrade analysis. All nodes must use the same protocol: mixed old
-writers would bypass it. A versioned rollout and isolated multi-node tests are
-required before removing the TiKV restriction.
+The TiKV provider still rejects explicit Router configuration before connecting,
+the datastore fence API also rejects direct TiKV backend builders, and TiKV's
+backend `safe_timestamp()` continues to reject the unsafe oracle contract.
+The datastore protocol is separate from that backend API.
+
+A fence cannot constrain old binaries that do not write it. Enabling Router on
+an existing/mixed-version cluster requires a coordinated, versioned rollout:
+drain old writers, make the storage/release compatibility gate reject them,
+resolve retained pre-protocol history and cursor baselines, and require every
+writer to participate. Absence of `/!lw` returns the earliest stamp; this is
+not a migration guarantee for older retained history. The release marker used
+by the parallel quota upgrade must be coordinated rather than changed here.
+
+Keep the TiKV Router restriction until disposable multi-node tests cover this
+rollout, reverse commit order, stale reader snapshots, aborts, restarts and
+unknown-commit outcomes. Inline behavior is unchanged and no cross-node Inline
+ordering certification is implied. Production release remains blocked on
+integration/runtime validation and the coordinated compatibility decision.

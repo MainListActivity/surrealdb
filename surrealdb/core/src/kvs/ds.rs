@@ -3408,7 +3408,7 @@ impl Datastore {
 	}
 
 	/// Under the Router live-query engine, seeds the router's baseline cursor
-	/// with the safe watermark, once: every subscription, and every write a
+	/// with the committed LIVE fence, once: every subscription, and every write a
 	/// subscriber expects to see, then lands strictly after it, where a lazy
 	/// baseline on the first router pass would discard the events captured
 	/// before it. Runs before the datastore serves a query. The Inline engine
@@ -3420,7 +3420,7 @@ impl Datastore {
 			return Ok(());
 		}
 		let txn = self.transaction(TransactionType::Read).await?;
-		let baseline = catch!(txn, txn.safe_timestamp().await).as_versionstamp();
+		let baseline = catch!(txn, txn.live_query_watermark().await).as_versionstamp();
 		txn.cancel().await?;
 		self.live_query_router.set_baseline(baseline);
 		Ok(())

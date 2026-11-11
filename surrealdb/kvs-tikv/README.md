@@ -22,9 +22,12 @@ commit, and a router reads an older MVCC snapshot. Advancing a cursor to that
 stamp can permanently skip a later-visible event. Returning the transaction's
 start timestamp alone does not solve pre-commit stamping.
 
-The provider rejects Router before connecting. The transaction's
-`safe_timestamp()` also fails explicitly for callers that supply the backend
-directly. There is no silent switch of engines. The default Inline engine is
+The provider rejects Router before connecting. The backend transaction's
+`safe_timestamp()` also fails explicitly instead of returning an unsafe oracle
+watermark. The datastore now has a separate atomic LIVE event-fence protocol;
+its rollout must exclude old writers and pass disposable multi-node tests before
+the restriction can be removed. The datastore fence API also rejects direct
+TiKV backend builders, so they cannot bypass the provider guard. There is no silent switch of engines. The default Inline engine is
 unchanged; this mitigation does not certify cross-node ordering for Inline.
 A host-managed External engine must supply its own committed change stream.
 
