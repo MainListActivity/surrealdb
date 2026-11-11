@@ -3,12 +3,13 @@ use std::sync::Arc;
 use crate::catalog::providers::DatabaseProvider;
 use crate::dbs::Session;
 use crate::iam::{Auth, Level, Role};
-use crate::key::database::qg::Qg;
-use crate::key::database::qt::Qt;
-use crate::kvs::{Datastore, LockType, TransactionType};
+use crate::key::schema::QuotaGenerationKey;
+use crate::key::schema::QuotaPolicyKey;
+use crate::kvs::Datastore;
+use surrealdb_kvs::TransactionType;
 
-async fn setup() -> Datastore {
-	let ds = Datastore::new("memory").await.unwrap();
+async fn setup() -> std::sync::Arc<Datastore> {
+	let ds = Datastore::builder().build_with_path("memory").await.unwrap();
 	let root = Session::owner();
 	let ns = Session::owner().with_ns("tenant");
 	ds.execute("DEFINE NAMESPACE tenant", &root, None).await.unwrap();
@@ -17,7 +18,7 @@ async fn setup() -> Datastore {
 }
 
 async fn generation(ds: &Datastore) -> Option<u64> {
-	let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await.unwrap();
+	let tx = ds.transaction(TransactionType::Read).await.unwrap();
 	let db = tx.get_db_by_name("tenant", "app", None).await.unwrap().unwrap();
 	let generation =
 		tx.get_db_quota(db.namespace_id, db.database_id, None).await.unwrap().map(|x| x.generation);
@@ -168,7 +169,7 @@ async fn semantic_noop_at_max_generation_does_not_overflow() {
 	.result
 	.unwrap();
 
-	let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
+	let tx = ds.transaction(TransactionType::Write).await.unwrap();
 	let db = tx.get_db_by_name("tenant", "app", None).await.unwrap().unwrap();
 	let mut policy = tx
 		.get_db_quota(db.namespace_id, db.database_id, None)
@@ -178,8 +179,24 @@ async fn semantic_noop_at_max_generation_does_not_overflow() {
 		.as_ref()
 		.clone();
 	policy.generation = u64::MAX;
-	tx.set(&Qt::new(db.namespace_id, db.database_id), &policy).await.unwrap();
-	tx.set(&Qg::new(db.namespace_id, db.database_id), &u64::MAX).await.unwrap();
+	tx.set_key(
+		&QuotaPolicyKey {
+			ns: db.namespace_id,
+			db: db.database_id,
+		},
+		&policy,
+	)
+	.await
+	.unwrap();
+	tx.set_key(
+		&QuotaGenerationKey {
+			ns: db.namespace_id,
+			db: db.database_id,
+		},
+		&u64::MAX,
+	)
+	.await
+	.unwrap();
 	tx.commit().await.unwrap();
 
 	ds.execute(

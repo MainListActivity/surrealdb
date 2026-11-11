@@ -3,11 +3,12 @@ use surrealdb_types::ToSql;
 use crate::catalog::providers::DatabaseProvider;
 use crate::dbs::Session;
 use crate::iam::{Level, Role};
-use crate::kvs::{Datastore, LockType, TransactionType};
-use crate::val::Value;
+use crate::kvs::Datastore;
+use surrealdb_kvs::TransactionType;
+use surrealdb_types::Value;
 
 async fn query_value(ds: &Datastore, sql: &str, session: &Session) -> Value {
-	ds.execute(sql, session, None).await.unwrap().remove(0).result.unwrap().into()
+	ds.execute(sql, session, None).await.unwrap().remove(0).result.unwrap()
 }
 
 async fn statement_error(ds: &Datastore, sql: &str, session: &Session) -> String {
@@ -19,7 +20,7 @@ async fn statement_error(ds: &Datastore, sql: &str, session: &Session) -> String
 
 #[tokio::test]
 async fn rebuild_quota_backfills_legacy_usage_and_reopens_writes() {
-	let ds = Datastore::new("memory").await.unwrap();
+	let ds = Datastore::builder().build_with_path("memory").await.unwrap();
 	let root = Session::owner();
 	let namespace_owner = Session::for_level(Level::Namespace("tenant".into()), Role::Owner);
 	let database_owner =
@@ -47,7 +48,7 @@ async fn rebuild_quota_backfills_legacy_usage_and_reopens_writes() {
 	.await
 	.unwrap();
 
-	let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
+	let tx = ds.transaction(TransactionType::Write).await.unwrap();
 	let db = tx.get_db_by_name("tenant", "app", None).await.unwrap().unwrap();
 	tx.quota_usage(db.namespace_id, db.database_id)
 		.begin_external_write_maintenance()
@@ -81,7 +82,7 @@ async fn rebuild_quota_backfills_legacy_usage_and_reopens_writes() {
 
 #[tokio::test]
 async fn rebuild_if_needed_is_a_ready_noop_and_normal_rebuild_recovers_a_crash() {
-	let ds = Datastore::new("memory").await.unwrap();
+	let ds = Datastore::builder().build_with_path("memory").await.unwrap();
 	let root = Session::owner();
 	let namespace_owner = Session::for_level(Level::Namespace("tenant".into()), Role::Owner);
 	let database_owner =
@@ -104,7 +105,7 @@ async fn rebuild_if_needed_is_a_ready_noop_and_normal_rebuild_recovers_a_crash()
 	let rebuilt = rebuilt.to_sql();
 	assert!(rebuilt.contains("active_epoch: 2"), "{rebuilt}");
 
-	let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
+	let tx = ds.transaction(TransactionType::Write).await.unwrap();
 	let db = tx.get_db_by_name("tenant", "app", None).await.unwrap().unwrap();
 	assert_eq!(tx.quota_usage(db.namespace_id, db.database_id).begin_rebuild().await.unwrap(), 3);
 	tx.commit().await.unwrap();

@@ -1,11 +1,6 @@
-use core::fmt::Write;
-
 use anyhow::{Result, bail};
 use clap::Args;
-use surrealdb_core::syn::lexer::Lexer;
-use surrealdb_core::syn::parse_with;
-use surrealdb_core::syn::parser::ParseResult;
-use surrealdb_core::syn::token::{Token, TokenKind};
+use surrealdb_core::syn;
 use surrealdb_types::ToSql;
 use tokio::fs;
 use tokio::io::{self, AsyncReadExt};
@@ -43,59 +38,7 @@ pub async fn init(
 		fs::read_to_string(&file).await?
 	};
 
-	let formatted = parse_with(content.as_bytes(), async |parser, stk| {
-		let mut output = String::new();
-		let mut carry_token = Token::invalid();
-
-		loop {
-			let is_eof = parser.lex_compound(carry_token, |lexer, _| Ok(lexer.is_eof()))?;
-
-			if is_eof.value {
-				break;
-			}
-
-			let result = parser.lex_compound(carry_token, |lexer, _| parse_line(lexer))?;
-
-			carry_token = Token {
-				kind: TokenKind::Invalid,
-				span: result.span.after(),
-			};
-
-			match result.value {
-				ParsedLine::SingleComment(s) => _ = write!(&mut output, "#{s}"),
-				ParsedLine::MultiComment(s) => output.push_str(&s),
-				ParsedLine::Whitespace => output.push('\n'),
-				ParsedLine::Statement => {
-					let parsed = stk.run(|ctx| parser.parse_statement(ctx)).await?;
-					parser.eat(TokenKind::SemiColon);
-
-					carry_token = Token {
-						kind: TokenKind::Invalid,
-						span: parser.recent_span(),
-					};
-
-					output += &parsed.to_sql_pretty();
-				}
-			}
-
-			let result = parser.lex_compound(carry_token, |lexer, _| {
-				let cr = lexer.eat(b'\r');
-				let lf = lexer.eat(b'\n');
-				Ok(cr || lf)
-			})?;
-
-			carry_token = Token {
-				kind: TokenKind::Invalid,
-				span: result.span.after(),
-			};
-
-			if result.value {
-				output += "\n";
-			}
-		}
-
-		Ok(output)
-	})?;
+	let formatted = format_source(&content)?;
 
 	if write {
 		fs::write(file, formatted).await?
@@ -106,86 +49,45 @@ pub async fn init(
 	Ok(())
 }
 
-/// Indicated the state of the line, and how should it be processed
-enum ParsedLine {
-	/// Normalize to a single comment
-	SingleComment(String),
-	/// Normalize to a multi-line comment
-	MultiComment(String),
-	/// Consume whitespace-only lines leaving just one
-	Whitespace,
-	/// Parse and format a statement
-	Statement,
+/// The new parser does not retain comments in its AST. Preserve source that
+/// might contain comments rather than silently deleting operator annotations.
+/// False positives inside strings are intentionally conservative.
+fn format_source(content: &str) -> Result<String> {
+	let query = syn::parse(content)?;
+	if ["#", "//", "/*", "--"].iter().any(|marker| content.contains(marker)) {
+		return Ok(content.to_owned());
+	}
+	Ok(query.to_sql_pretty())
 }
 
-fn parse_line(lexer: &mut Lexer) -> ParseResult<ParsedLine> {
-	lexer.eat_single_line_whitespace();
-	lexer.advance_span();
+#[cfg(test)]
+mod tests {
+	use super::format_source;
 
-	if lexer.is_eof() {
-		return Ok(ParsedLine::Whitespace);
+	#[test]
+	fn preserves_comments_without_losing_source() {
+		for source in [
+			"-- operator note\nRETURN 1;",
+			"RETURN /* inline */ 1;",
+			"# note\nRETURN 1;",
+			"RETURN 1; // trailing\n",
+			"RETURN 1; // EOF",
+			"# EOF",
+			"-- EOF",
+			"/* EOF */",
+			"",
+		] {
+			assert_eq!(format_source(source).unwrap(), source);
+		}
 	}
 
-	let mut span = lexer.current_span();
-	span.len = 1;
-
-	let lookahead = lexer.span_bytes(span);
-
-	match lookahead {
-		b"#" => {
-			lexer.eat(b'#');
-			lexer.advance_span();
-			Ok(parse_single_line_comment(lexer))
-		}
-		b"-" => {
-			let mut span = span.after();
-			span.len = 1;
-			let lookahead = lexer.span_bytes(span);
-
-			if lookahead == b"-" {
-				lexer.eat(b'-');
-				lexer.eat(b'-');
-				lexer.advance_span();
-				Ok(parse_single_line_comment(lexer))
-			} else {
-				Ok(ParsedLine::Statement)
-			}
-		}
-		b"/" => {
-			let mut span = span.after();
-			span.len = 1;
-			let lookahead = lexer.span_bytes(span);
-
-			match lookahead {
-				b"/" => {
-					lexer.eat(b'/');
-					lexer.eat(b'/');
-					lexer.advance_span();
-					Ok(parse_single_line_comment(lexer))
-				}
-				b"*" => {
-					lexer.eat(b'/');
-					lexer.eat(b'*');
-					lexer.eat_multi_line_comment()?;
-					let span = lexer.advance_span();
-					let comment = lexer.span_str(span).to_string();
-					Ok(ParsedLine::MultiComment(comment))
-				}
-				_ => Ok(ParsedLine::Statement),
-			}
-		}
-		b"\n" | b"\r" => {
-			lexer.eat_whitespace();
-			lexer.advance_span();
-			Ok(ParsedLine::Whitespace)
-		}
-		_ => Ok(ParsedLine::Statement),
+	#[test]
+	fn validates_even_when_preserving_comments() {
+		assert!(format_source("# note\nSELECT FROM;").is_err());
 	}
-}
 
-fn parse_single_line_comment(lexer: &mut Lexer) -> ParsedLine {
-	lexer.eat_single_line_comment();
-	let span = lexer.advance_span();
-	let comment = lexer.span_str(span).to_string();
-	ParsedLine::SingleComment(comment)
+	#[test]
+	fn formats_comment_free_source() {
+		assert_eq!(format_source("return 1;").unwrap(), "RETURN 1;");
+	}
 }

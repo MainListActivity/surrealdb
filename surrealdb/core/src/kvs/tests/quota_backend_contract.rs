@@ -1,3 +1,4 @@
+use super::QuotaTransactionTestExt;
 use std::sync::Arc;
 
 use tokio::sync::Barrier;
@@ -9,10 +10,10 @@ use crate::catalog::providers::DatabaseProvider;
 use crate::dbs::Session;
 use crate::kvs::quota::QuotaUsageSnapshot;
 use crate::kvs::testing::{QuotaFaultSite, inject_quota_fault};
-use crate::kvs::{Datastore, LockType, TransactionType};
-use crate::val::TableName;
+use crate::kvs::{Datastore, TransactionType};
+use surrealdb_strand::TableName;
 
-async fn setup(new_ds: impl CreateDs, node_id: Uuid) -> Datastore {
+async fn setup(new_ds: impl CreateDs, node_id: Uuid) -> std::sync::Arc<Datastore> {
 	let (ds, _) = new_ds.create_ds(node_id).await;
 	ds.execute("DEFINE NAMESPACE tenant", &Session::owner(), None)
 		.await
@@ -54,7 +55,7 @@ async fn statement_error(ds: &Datastore, sql: &str, session: &Session) -> String
 }
 
 async fn database_ids(ds: &Datastore) -> (crate::catalog::NamespaceId, crate::catalog::DatabaseId) {
-	let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await.unwrap();
+	let tx = ds.transaction(TransactionType::Read).await.unwrap();
 	let db = tx.get_db_by_name("tenant", "app", None).await.unwrap().unwrap();
 	let ids = (db.namespace_id, db.database_id);
 	tx.cancel().await.unwrap();
@@ -63,7 +64,7 @@ async fn database_ids(ds: &Datastore) -> (crate::catalog::NamespaceId, crate::ca
 
 async fn record_count(ds: &Datastore, table: &str) -> u64 {
 	let (ns, db) = database_ids(ds).await;
-	let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await.unwrap();
+	let tx = ds.transaction(TransactionType::Read).await.unwrap();
 	let count = tx.quota_usage(ns, db).record_count(&TableName::from(table)).await.unwrap();
 	tx.cancel().await.unwrap();
 	count
@@ -71,7 +72,7 @@ async fn record_count(ds: &Datastore, table: &str) -> u64 {
 
 async fn field_count(ds: &Datastore, table: &str) -> u64 {
 	let (ns, db) = database_ids(ds).await;
-	let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await.unwrap();
+	let tx = ds.transaction(TransactionType::Read).await.unwrap();
 	let count = tx.quota_usage(ns, db).field_count(&TableName::from(table)).await.unwrap();
 	tx.cancel().await.unwrap();
 	count
@@ -79,7 +80,7 @@ async fn field_count(ds: &Datastore, table: &str) -> u64 {
 
 async fn table_bucket_count(ds: &Datastore, generation: u64, rule: &str) -> u64 {
 	let (ns, db) = database_ids(ds).await;
-	let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await.unwrap();
+	let tx = ds.transaction(TransactionType::Read).await.unwrap();
 	let count = tx.quota_usage(ns, db).table_bucket_count(generation, rule).await.unwrap();
 	tx.cancel().await.unwrap();
 	count
@@ -176,7 +177,7 @@ pub async fn multi_node_mixed_contention_contract(new_ds: impl CreateDs) {
 	const CLIENTS: usize = 72;
 
 	let primary_id = Uuid::new_v4();
-	let primary = Arc::new(setup(new_ds, primary_id).await);
+	let primary = setup(new_ds, primary_id).await;
 	let secondary = Arc::new(primary.fork_for_test_with_node_id(Uuid::new_v4()));
 	let ns_owner = namespace_owner();
 	let db_owner = database_owner();
@@ -239,7 +240,7 @@ async fn execute_in_transaction(
 	ds: &Datastore,
 	sql: &str,
 ) -> (Arc<crate::kvs::Transaction>, anyhow::Result<()>) {
-	let tx = Arc::new(ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap());
+	let tx = Arc::new(ds.transaction(TransactionType::Write).await.unwrap());
 	let result =
 		match ds.execute_with_transaction(sql, &database_owner(), None, Arc::clone(&tx)).await {
 			Ok(responses) => {
@@ -338,8 +339,7 @@ pub async fn generation_and_rebuild_epoch_contract(new_ds: impl CreateDs) {
 	.unwrap();
 	statement_result(&ds, "DEFINE TABLE ent_generation", &db_owner).await.unwrap();
 
-	let writer =
-		Arc::new(ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap());
+	let writer = Arc::new(ds.transaction(TransactionType::Write).await.unwrap());
 	let responses = ds
 		.execute_with_transaction(
 			"CREATE ent_generation:stale",
@@ -361,17 +361,20 @@ pub async fn generation_and_rebuild_epoch_contract(new_ds: impl CreateDs) {
 	.await
 	.unwrap();
 	assert!(writer.commit().await.is_err());
+	drop(writer);
 	assert_eq!(record_count(&ds, "ent_generation").await, 0);
 	assert_eq!(physical_record_count(&ds, "ent_generation").await, 0);
 
 	let (ns, db) = database_ids(&ds).await;
-	let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
+	let tx = ds.transaction(TransactionType::Write).await.unwrap();
 	let quota = tx.quota_usage(ns, db);
 	assert_eq!(quota.begin_rebuild().await.unwrap(), 2);
 	quota.set_staged_record_count(&TableName::from("ent_generation"), 7).await.unwrap();
 	tx.commit().await.unwrap();
+	drop(quota);
+	drop(tx);
 
-	let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
+	let tx = ds.transaction(TransactionType::Write).await.unwrap();
 	let quota = tx.quota_usage(ns, db);
 	let mut expected = QuotaUsageSnapshot::default();
 	expected.set_record_count(&TableName::from("ent_generation"), 7);
@@ -379,8 +382,11 @@ pub async fn generation_and_rebuild_epoch_contract(new_ds: impl CreateDs) {
 	quota.activate_validated_epoch(validated).await.unwrap();
 	tx.cancel().await.unwrap();
 
-	let restarted = ds.restart();
-	let tx = restarted.transaction(TransactionType::Read, LockType::Optimistic).await.unwrap();
+	drop(quota);
+	drop(tx);
+	let restarted =
+		Arc::try_unwrap(ds).ok().expect("all datastore handles released before restart").restart();
+	let tx = restarted.transaction(TransactionType::Read).await.unwrap();
 	let quota = tx.quota_usage(ns, db);
 	let meta = quota.meta().await.unwrap();
 	assert_eq!(meta.state, QuotaUsageState::Rebuilding);
@@ -392,7 +398,7 @@ pub async fn generation_and_rebuild_epoch_contract(new_ds: impl CreateDs) {
 	assert!(fenced.contains("ledger is rebuilding"), "{fenced}");
 
 	statement_result(&restarted, "REBUILD QUOTA ON DATABASE app", &ns_owner).await.unwrap();
-	let tx = restarted.transaction(TransactionType::Read, LockType::Optimistic).await.unwrap();
+	let tx = restarted.transaction(TransactionType::Read).await.unwrap();
 	let quota = tx.quota_usage(ns, db);
 	let meta = quota.meta().await.unwrap();
 	assert_eq!(meta.state, QuotaUsageState::Ready);

@@ -6,16 +6,30 @@ pub mod capabilities;
 mod config;
 pub(crate) mod endpoint;
 mod export;
+mod grpc;
 pub(crate) mod query;
 mod resource;
+#[cfg(any(
+	feature = "kv-mem",
+	feature = "kv-surrealkv",
+	all(feature = "kv-tikv", not(target_family = "wasm"))
+))]
+mod storage;
 mod tls;
 mod websocket;
 
 pub use config::*;
 pub use endpoint::*;
 pub use export::*;
+pub use grpc::*;
 pub use query::*;
 pub use resource::*;
+#[cfg(any(
+	feature = "kv-mem",
+	feature = "kv-surrealkv",
+	all(feature = "kv-tikv", not(target_family = "wasm"))
+))]
+pub use storage::{AolMode, SnapshotMode, SyncMode};
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 pub use tls::*;
 pub use websocket::*;

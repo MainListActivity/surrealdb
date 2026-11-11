@@ -1,22 +1,17 @@
 use temp_dir::TempDir;
 use uuid::Uuid;
 
-use crate::CommunityComposer;
 use crate::catalog::QuotaUsageState;
 use crate::catalog::providers::DatabaseProvider;
 use crate::dbs::Session;
-use crate::kvs::{Datastore, LockType, TransactionType};
-use crate::val::TableName;
+use crate::kvs::{Datastore, TransactionType};
+use surrealdb_strand::TableName;
 
 const CRASH_CHILD_PATH: &str = "SURREAL_QUOTA_ROCKSDB_CRASH_CHILD_PATH";
 const CERTIFICATION_TEST: &str = "kvs::tests::quota_rocksdb_certification::quota_persistent_restart_recovers_interrupted_rebuild_without_epoch_flip";
 
-async fn open(path: &str) -> Datastore {
-	Datastore::builder()
-		.with_id(Uuid::new_v4())
-		.build_with_factory_path(path, CommunityComposer())
-		.await
-		.unwrap()
+async fn open(path: &str) -> std::sync::Arc<Datastore> {
+	Datastore::builder().with_id(Uuid::new_v4()).build_with_path(path).await.unwrap()
 }
 
 async fn statement_result(ds: &Datastore, sql: &str, session: &Session) -> anyhow::Result<()> {
@@ -36,7 +31,7 @@ async fn statement_error(ds: &Datastore, sql: &str, session: &Session) -> String
 }
 
 async fn database_ids(ds: &Datastore) -> (crate::catalog::NamespaceId, crate::catalog::DatabaseId) {
-	let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await.unwrap();
+	let tx = ds.transaction(TransactionType::Read).await.unwrap();
 	let db = tx.get_db_by_name("tenant", "app", None).await.unwrap().unwrap();
 	let ids = (db.namespace_id, db.database_id);
 	tx.cancel().await.unwrap();
@@ -48,7 +43,7 @@ async fn record_count(
 	ns: crate::catalog::NamespaceId,
 	db: crate::catalog::DatabaseId,
 ) -> u64 {
-	let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await.unwrap();
+	let tx = ds.transaction(TransactionType::Read).await.unwrap();
 	let count = tx.quota_usage(ns, db).record_count(&TableName::from("ent_restart")).await.unwrap();
 	tx.cancel().await.unwrap();
 	count
@@ -80,7 +75,7 @@ async fn seed_interrupted_rebuild(path: &str) {
 	let (ns, db) = database_ids(&ds).await;
 	assert_eq!(record_count(&ds, ns, db).await, 2);
 
-	let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
+	let tx = ds.transaction(TransactionType::Write).await.unwrap();
 	let quota = tx.quota_usage(ns, db);
 	assert_eq!(quota.begin_rebuild().await.unwrap(), 2);
 	quota.set_staged_record_count(&TableName::from("ent_restart"), 99).await.unwrap();
@@ -111,7 +106,7 @@ async fn quota_persistent_restart_recovers_interrupted_rebuild_without_epoch_fli
 	let (ns, db) = database_ids(&reopened).await;
 	let namespace_owner = Session::owner().with_ns("tenant");
 	let database_owner = Session::owner().with_ns("tenant").with_db("app");
-	let tx = reopened.transaction(TransactionType::Read, LockType::Optimistic).await.unwrap();
+	let tx = reopened.transaction(TransactionType::Read).await.unwrap();
 	let quota = tx.quota_usage(ns, db);
 	let meta = quota.meta().await.unwrap();
 	assert_eq!(meta.state, QuotaUsageState::Rebuilding);
