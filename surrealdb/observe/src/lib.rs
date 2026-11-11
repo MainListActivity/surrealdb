@@ -54,14 +54,13 @@ pub use events::{
 	IndexHnswCacheDiscardEventCtx, IndexHnswCacheDiscardEventSafe, IndexPendingReadEvent,
 	IndexPendingReadEventCtx, IndexPendingReadEventSafe, NetworkBytesEvent, NetworkBytesEventCtx,
 	NetworkBytesEventSafe, NetworkDirection, Outcome, QueryCounters, QueryEvent, QueryEventCtx,
-	QueryEventSafe, RpcEvent, RpcEventCtx, RpcEventSafe, SessionAction, SessionEvent,
-	SessionEventCtx, SessionEventSafe, SessionProtocol, StatementEvent, StatementEventCtx,
-	StatementEventSafe, StatementType, TaskLeaseState, TaskPassEvent, TaskPassEventCtx,
-	TaskPassEventSafe, TenantIdentity, TransactionEvent, TransactionEventCtx, TransactionEventSafe,
+	QueryEventSafe, QuotaEvent, QuotaEventCtx, QuotaEventKind, QuotaEventOutcome, QuotaEventSafe,
+	RpcEvent, RpcEventCtx, RpcEventSafe, SessionAction, SessionEvent, SessionEventCtx,
+	SessionEventSafe, SessionProtocol, StatementEvent, StatementEventCtx, StatementEventSafe,
+	StatementType, TaskLeaseState, TaskPassEvent, TaskPassEventCtx, TaskPassEventSafe,
+	TenantIdentity, TransactionEvent, TransactionEventCtx, TransactionEventSafe,
 	TransactionMetrics, TransactionMetricsSnapshot,
 };
 pub use fan_out::FanOutObserver;
 pub use observer::{ExecutionObserver, NoopObserver};
 pub use provider::ObservabilityProvider;
-
-pub use events::{QuotaEvent, QuotaEventCtx, QuotaEventKind, QuotaEventOutcome, QuotaEventSafe};

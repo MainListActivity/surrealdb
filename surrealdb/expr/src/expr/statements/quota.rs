@@ -1,7 +1,6 @@
+use common::fmt::EscapeIdent;
 use surrealdb_strand::Strand;
 use surrealdb_types::{Regex, SqlFormat, ToSql, write_sql};
-
-use common::fmt::EscapeIdent;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

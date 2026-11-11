@@ -235,4 +235,3 @@ mod test {
 		assert_eq!(config.shutdown_gc_timeout_secs, 5);
 	}
 }
-

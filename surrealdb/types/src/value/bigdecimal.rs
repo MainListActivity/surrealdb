@@ -136,6 +136,19 @@ pub struct BigDecimal {
 	scale: i64,
 }
 
+#[cfg(feature = "arbitrary")]
+impl<'a> arbitrary::Arbitrary<'a> for BigDecimal {
+	fn arbitrary(input: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+		let length = input.int_in_range(0..=64_usize)?;
+		let coefficient = BigInt::from_signed_bytes_le(input.bytes(length)?);
+		let scale = input.int_in_range(0..=64_i64)?;
+		Ok(Self {
+			coefficient,
+			scale,
+		})
+	}
+}
+
 #[derive(Clone, Copy)]
 enum Rounding {
 	HalfAwayFromZero,
@@ -1116,6 +1129,21 @@ mod tests {
 	use rust_decimal::RoundingStrategy;
 
 	use super::*;
+
+	#[cfg(feature = "arbitrary")]
+	#[test]
+	fn arbitrary_decimals_preserve_invariants_and_round_trip() {
+		for seed in 0..=64_u8 {
+			let mut bytes = vec![seed; 128];
+			bytes[0] = seed;
+			let value = <BigDecimal as arbitrary::Arbitrary>::arbitrary(
+				&mut arbitrary::Unstructured::new(&bytes),
+			)
+			.unwrap();
+			assert!(value.scale() >= 0);
+			assert_eq!(value.to_string().parse::<BigDecimal>().unwrap(), value);
+		}
+	}
 
 	/// Deterministic xorshift generator for the property-style loops.
 	struct Xorshift(u64);

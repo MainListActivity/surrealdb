@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
+use surrealdb_kvs::TransactionType;
+
 use crate::catalog::providers::DatabaseProvider;
 use crate::dbs::Session;
 use crate::iam::{Auth, Level, Role};
-use crate::key::schema::QuotaGenerationKey;
-use crate::key::schema::QuotaPolicyKey;
+use crate::key::schema::{QuotaGenerationKey, QuotaPolicyKey};
 use crate::kvs::Datastore;
-use surrealdb_kvs::TransactionType;
 
 async fn setup() -> std::sync::Arc<Datastore> {
 	let ds = Datastore::builder().build_with_path("memory").await.unwrap();

@@ -2,18 +2,17 @@ use std::collections::HashSet;
 
 use anyhow::{Result, bail};
 use revision::revisioned;
+use surrealdb_kvs::impl_kv_value_revisioned;
 use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql};
 
-use crate::Error;
-use crate::expr;
 use crate::expr::statements::define::{DefineKind, DefineQuotaStatement};
 use crate::expr::statements::quota::{
 	QuotaLimit as SqlQuotaLimit, QuotaResource as SqlQuotaResource, QuotaRule as SqlQuotaRule,
 	QuotaSelector as SqlQuotaSelector,
 };
 use crate::val::{Datetime, Regex};
-use surrealdb_kvs::impl_kv_value_revisioned;
+use crate::{Error, expr};
 
 /// Current format revision of native quota policies.
 pub const QUOTA_POLICY_FORMAT_REVISION: u16 = 1;

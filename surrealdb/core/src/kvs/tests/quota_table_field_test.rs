@@ -1,10 +1,11 @@
-use super::QuotaTransactionTestExt;
 use std::sync::Arc;
 
+use surrealdb_kvs::TransactionType;
+
+use super::QuotaTransactionTestExt;
 use crate::catalog::providers::{DatabaseProvider, TableProvider};
 use crate::dbs::Session;
 use crate::kvs::Datastore;
-use surrealdb_kvs::TransactionType;
 
 async fn setup() -> std::sync::Arc<Datastore> {
 	let ds = Datastore::builder().build_with_path("memory").await.unwrap();

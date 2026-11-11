@@ -1,15 +1,13 @@
 //! The [`ExecutionObserver`] trait and the no-op default implementation.
 
-use super::events::QuotaEvent;
-#[cfg(test)]
-use super::events::{QuotaEventCtx, QuotaEventKind, QuotaEventOutcome, QuotaEventSafe};
-
 use super::events::{
 	AuthEvent, BucketOperationEvent, HttpRequestEvent, HttpRequestStartEvent,
 	IndexCompactionPassEvent, IndexCompactionPlanEvent, IndexCompactionRetryEvent,
-	IndexHnswCacheDiscardEvent, IndexPendingReadEvent, NetworkBytesEvent, QueryEvent, RpcEvent,
-	SessionEvent, StatementEvent, TaskPassEvent, TransactionEvent,
+	IndexHnswCacheDiscardEvent, IndexPendingReadEvent, NetworkBytesEvent, QueryEvent, QuotaEvent,
+	RpcEvent, SessionEvent, StatementEvent, TaskPassEvent, TransactionEvent,
 };
+#[cfg(test)]
+use super::events::{QuotaEventCtx, QuotaEventKind, QuotaEventOutcome, QuotaEventSafe};
 
 /// Hook surface for receiving structured observability events from the core
 /// during query execution, transactions, RPC calls, authentication, and

@@ -1,10 +1,10 @@
 use anyhow::{Result, bail};
 use revision::revisioned;
+use surrealdb_catalog::Error;
+use surrealdb_kvs::impl_kv_value_revisioned;
 
 use crate::catalog::{QUOTA_POLICY_FORMAT_REVISION, QUOTA_USAGE_FORMAT_REVISION};
 use crate::version::MajorVersion;
-use surrealdb_catalog::Error;
-use surrealdb_kvs::impl_kv_value_revisioned;
 
 /// Stable identifier written into datastores that require the native-quota fork.
 pub const NATIVE_QUOTA_FORK_ID: &str = "mainlistactivity/surrealdb-native-quota";
@@ -141,8 +141,9 @@ impl ForkStorageFormat {
 
 #[cfg(test)]
 mod tests {
-	use super::*;
 	use surrealdb_kvs::value::KVValue;
+
+	use super::*;
 
 	#[test]
 	fn current_marker_revision_fixture_is_frozen() {

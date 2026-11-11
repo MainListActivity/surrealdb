@@ -354,7 +354,7 @@ mod tests {
 		async fn fixture() -> (Arc<Datastore>, NamespaceId, DatabaseId) {
 			let ds = Datastore::new("memory").await.unwrap();
 			execute(&ds, "DEFINE TABLE t SCHEMAFULL; DEFINE TABLE u SCHEMAFULL;").await;
-			let txn = crate::kvs::migration::transaction(ds, TransactionType::Read).await.unwrap();
+			let txn = crate::kvs::migration::transaction(&ds, TransactionType::Read).await.unwrap();
 			let database = txn.expect_db_by_name("test", "test").await.unwrap();
 			txn.cancel().await.unwrap();
 			(ds, database.namespace_id, database.database_id)
@@ -465,7 +465,7 @@ mod tests {
 			write_at(&ds, (ns, db), "t", LEGACY_ELEMENT, element("t", STORAGE_ELEMENT)).await;
 			let version = async || {
 				let txn =
-					crate::kvs::migration::transaction(ds, TransactionType::Read).await.unwrap();
+					crate::kvs::migration::transaction(&ds, TransactionType::Read).await.unwrap();
 				let version = txn.catalog_version(ns, db, &TableName::from("t")).await.unwrap();
 				txn.cancel().await.unwrap();
 				version
@@ -540,7 +540,7 @@ mod tests {
 		async fn each_table_is_migrated() {
 			let (ds, ns, db) = fixture().await;
 			execute(&ds, "DEFINE DATABASE other; USE DB other; DEFINE TABLE v;").await;
-			let txn = crate::kvs::migration::transaction(ds, TransactionType::Read).await.unwrap();
+			let txn = crate::kvs::migration::transaction(&ds, TransactionType::Read).await.unwrap();
 			let other = txn.expect_db_by_name("test", "other").await.unwrap().database_id;
 			txn.cancel().await.unwrap();
 			let tables = [(db, "t"), (db, "u"), (other, "v")];
@@ -589,7 +589,7 @@ mod tests {
 
 			assert_eq!(names(&ds, (ns, db), "t").await, vec![STORAGE_ELEMENT]);
 			// Recorded, so a restart does not walk the bands again.
-			let txn = crate::kvs::migration::transaction(ds, TransactionType::Read).await.unwrap();
+			let txn = crate::kvs::migration::transaction(&ds, TransactionType::Read).await.unwrap();
 			let recorded = txn.exists_key(&MigrationKey::new(LEDGER_ID.raw()), None).await.unwrap();
 			txn.cancel().await.unwrap();
 			assert!(recorded);
@@ -606,7 +606,8 @@ mod tests {
 			execute(&ds, "DEFINE FIELD `select` ON t TYPE array<string>;").await;
 			// Move the definition the kind implied to where 3.3 wrote it.
 			let implied = band(&ds, (ns, db), "t").await.remove(1).1;
-			let txn = crate::kvs::migration::transaction(ds, TransactionType::Write).await.unwrap();
+			let txn =
+				crate::kvs::migration::transaction(&ds, TransactionType::Write).await.unwrap();
 			txn.del(key(ns, db, "t", STORAGE_ELEMENT)).await.unwrap();
 			txn.set(key(ns, db, "t", LEGACY_ELEMENT), implied).await.unwrap();
 			txn.commit().await.unwrap();

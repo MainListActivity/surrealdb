@@ -5,6 +5,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use anyhow::{Result, bail};
+use surrealdb_catalog::{Error, QuotaExceededError, QuotaViolation};
+use surrealdb_collections::map;
+use surrealdb_kvs::key::{KVKey, KVKeyDecode, Resumable};
+use surrealdb_kvs::value::KVValue;
 
 use super::Transaction;
 use crate::NORMAL_BATCH_SIZE;
@@ -18,14 +22,9 @@ use crate::key::schema::{
 	QuotaLatestChangeKey as Ql, QuotaRecordUsageKey as QuotaRecordUsage,
 	QuotaTableBucketKey as QuotaTableBucket, QuotaUsageMetaKey as Qm,
 };
-use crate::val::{Datetime, Object, TableName, Value};
-use surrealdb_catalog::{Error, QuotaExceededError, QuotaViolation};
-use surrealdb_collections::map;
-use surrealdb_kvs::key::{KVKey, KVKeyDecode, Resumable};
-use surrealdb_kvs::value::KVValue;
-
 #[cfg(any(test, feature = "test-hooks"))]
 use crate::testing::{QuotaFaultSite, maybe_inject_quota_fault};
+use crate::val::{Datetime, Object, TableName, Value};
 
 const MAX_QUOTA_VIOLATIONS: usize = 64;
 
@@ -1948,14 +1947,15 @@ mod tests {
 
 #[cfg(test)]
 mod memory_transaction_tests {
+	use surrealdb_cnf::ConfigMap;
+	use surrealdb_expr::val::RecordIdKey;
+	use surrealdb_kvs::Key;
+
 	use super::*;
 	use crate::key::schema::{QuotaPolicyKey, RecordKey};
 	use crate::sequences::Sequences;
 	use crate::tx::WriteBatch;
 	use crate::{TransactionFactory, TransactionType};
-	use surrealdb_cnf::ConfigMap;
-	use surrealdb_expr::val::RecordIdKey;
-	use surrealdb_kvs::Key;
 
 	const NS: NamespaceId = NamespaceId(1);
 	const DB: DatabaseId = DatabaseId(2);
@@ -2029,9 +2029,10 @@ mod memory_transaction_tests {
 
 	#[tokio::test]
 	async fn direct_database_catalog_write_bootstraps_only_new_databases() {
+		use surrealdb_expr::val::stored::schema::Unrevisioned;
+
 		use crate::catalog::{DatabaseCompatibility, DatabaseDefinition};
 		use crate::key::schema::DatabaseKey;
-		use surrealdb_expr::val::stored::schema::Unrevisioned;
 		let (factory, sequences) = empty_factory().await;
 		let key = DatabaseKey {
 			ns: NS,

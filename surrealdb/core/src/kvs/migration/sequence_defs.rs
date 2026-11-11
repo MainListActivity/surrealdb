@@ -547,7 +547,8 @@ mod tests {
 				root.extend_from_slice(&storekey::encode_vec(&table).unwrap());
 				roots.push(root);
 			}
-			let txn = crate::kvs::migration::transaction(ds, TransactionType::Write).await.unwrap();
+			let txn =
+				crate::kvs::migration::transaction(&ds, TransactionType::Write).await.unwrap();
 			let mut planted = Vec::new();
 			for root in &roots {
 				for suffix in
@@ -627,7 +628,8 @@ mod tests {
 			// Stands in for whatever reached `!sd` first: another node's copy, or
 			// a client's `DEFINE SEQUENCE orders BATCH 999`.
 			let newer = definition("orders", 999, 42);
-			let txn = crate::kvs::migration::transaction(ds, TransactionType::Write).await.unwrap();
+			let txn =
+				crate::kvs::migration::transaction(&ds, TransactionType::Write).await.unwrap();
 			txn.set_key(&SequenceKey::new(ns, db, std::borrow::Cow::Borrowed("orders")), &newer)
 				.await
 				.unwrap();
@@ -679,7 +681,8 @@ mod tests {
 			let mut key = DbRoot::new(ns, db).encode_bound().unwrap().as_ref().to_vec();
 			key.extend_from_slice(LEGACY_TAG);
 			key.extend_from_slice(&storekey::encode_vec(&"mystery").unwrap());
-			let txn = crate::kvs::migration::transaction(ds, TransactionType::Write).await.unwrap();
+			let txn =
+				crate::kvs::migration::transaction(&ds, TransactionType::Write).await.unwrap();
 			txn.set(Key::from(key.clone()), vec![0xff, 0xff, 0xff]).await.unwrap();
 			txn.commit().await.unwrap();
 
@@ -728,7 +731,8 @@ mod tests {
 			root.extend_from_slice(b"*");
 			root.extend_from_slice(&storekey::encode_vec(&"sqbulk").unwrap());
 			let padding = (SCAN_BATCH as usize) * 2 + 7;
-			let txn = crate::kvs::migration::transaction(ds, TransactionType::Write).await.unwrap();
+			let txn =
+				crate::kvs::migration::transaction(&ds, TransactionType::Write).await.unwrap();
 			for i in 0..padding {
 				let mut key = root.clone();
 				key.extend_from_slice(b"*");
@@ -762,7 +766,8 @@ mod tests {
 			create_db(&ds, NamespaceId(1), DatabaseId(1), "one").await;
 			create_db(&ds, NamespaceId(2), DatabaseId(1), "two").await;
 			// A second database inside the namespace that already exists.
-			let txn = crate::kvs::migration::transaction(ds, TransactionType::Write).await.unwrap();
+			let txn =
+				crate::kvs::migration::transaction(&ds, TransactionType::Write).await.unwrap();
 			txn.put_db("two", database(NamespaceId(2), DatabaseId(2), "gamma")).await.unwrap();
 			txn.commit().await.unwrap();
 			for (ns, db) in places {

@@ -1,8 +1,8 @@
 use anyhow::{Result, bail};
 use revision::revisioned;
+use surrealdb_kvs::impl_kv_value_revisioned;
 
 use crate::Error;
-use surrealdb_kvs::impl_kv_value_revisioned;
 
 /// Current format revision of native quota usage metadata.
 pub const QUOTA_USAGE_FORMAT_REVISION: u16 = 1;
@@ -118,8 +118,9 @@ impl QuotaUsageMeta {
 
 #[cfg(test)]
 mod tests {
-	use super::*;
 	use surrealdb_kvs::value::KVValue;
+
+	use super::*;
 
 	#[test]
 	fn ready_usage_revision_fixture_is_frozen() {

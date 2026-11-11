@@ -1,5 +1,4 @@
 //! Public native quota identity and explicit, fenced offline storage migration.
-use super::{Datastore, Transaction, TransactionType, migration};
 use anyhow::{Result, bail};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -14,8 +13,11 @@ use surrealdb_datastore::key::schema::{
 	QuotaLatestChangeKey, QuotaPolicyKey, QuotaUsageMetaKey, VersionKey,
 };
 use surrealdb_datastore::version::{MajorVersion, StorageVersion};
-use surrealdb_kvs::{Key, key::RawRange};
+use surrealdb_kvs::Key;
+use surrealdb_kvs::key::RawRange;
 use uuid::Uuid;
+
+use super::{Datastore, Transaction, TransactionType, migration};
 /// Capability name required by native quota-aware clients and readiness probes.
 pub const NATIVE_QUOTA_CAPABILITY: &str = "native-quota-v1";
 /// Stable public INFO DTO major.

@@ -3,15 +3,16 @@
 use std::borrow::Cow;
 use std::sync::Arc;
 
+use surrealdb_datastore::WriteBatch;
+use surrealdb_kvs::TransactionType;
+use surrealdb_kvs::key::KVKey;
+
 use crate::catalog::providers::{DatabaseProvider, TableProvider};
 use crate::catalog::{Record, StoredRecord};
 use crate::dbs::Session;
 use crate::key::schema::RecordKey;
 use crate::kvs::Datastore;
 use crate::val::{RecordId, RecordIdKey, TableName, Value};
-use surrealdb_datastore::WriteBatch;
-use surrealdb_kvs::TransactionType;
-use surrealdb_kvs::key::KVKey;
 
 async fn run(ds: &Datastore, session: &Session, sql: &str) {
 	for response in ds.execute(sql, session, None).await.expect(sql) {

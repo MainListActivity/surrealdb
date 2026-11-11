@@ -56,6 +56,9 @@ use surrealdb_kvs::snapshot::ViewCapabilities;
 use surrealdb_kvs::timestamp::{BoxTimeStamp, BoxTimeStampImpl};
 use surrealdb_kvs::value::{EncodeContext, Encoded, KVValue};
 use surrealdb_kvs::{Estimate, FeatureLevel, Key, KeyRange, Release, Snapshot, SplitTarget};
+use surrealdb_observe::events::{
+	QuotaEvent, QuotaEventCtx, QuotaEventKind, QuotaEventOutcome, QuotaEventSafe,
+};
 use surrealdb_observe::{
 	ExecutionObserver, Outcome, TenantIdentity, TransactionEvent, TransactionEventSafe,
 	TransactionMetrics,
@@ -65,12 +68,6 @@ use uuid::Uuid;
 use web_time::Instant;
 
 use crate::cache::tx::TransactionCache;
-use crate::quota::QuotaTransactionState;
-#[cfg(any(test, feature = "test-hooks"))]
-use crate::testing::{QuotaFaultSite, maybe_inject_quota_fault};
-use surrealdb_observe::events::{
-	QuotaEvent, QuotaEventCtx, QuotaEventKind, QuotaEventOutcome, QuotaEventSafe,
-};
 // The transaction holds the queue because only it knows when the outcome is
 // settled; what to run belongs to the layer that registered it.
 use crate::close::{
@@ -105,12 +102,15 @@ use crate::layouts::LayoutSet;
 use crate::obs::Instrument;
 use crate::out_of_line::OutOfLine;
 use crate::pending_guard::{GuardedIndex, PENDING_GUARD_SHARDS};
+use crate::quota::QuotaTransactionState;
 use crate::sequences::{Sequence, Sequences};
 #[cfg(any(test, feature = "test-hooks"))]
 use crate::testing::{
 	NonRetryableErrorSite, RetryableConflictSite, maybe_inject_non_retryable_error,
 	maybe_inject_retryable_conflict,
 };
+#[cfg(any(test, feature = "test-hooks"))]
+use crate::testing::{QuotaFaultSite, maybe_inject_quota_fault};
 use crate::triggers::{CommitTriggers, FencedTable};
 use crate::values::catalog_version::{CatalogObject, CatalogObjectKind, CatalogVersion};
 use crate::values::changefeed::Changefeed;

@@ -216,7 +216,8 @@ mod tests {
 			{
 				response.result.unwrap();
 			}
-			let txn = crate::kvs::migration::transaction(ds, TransactionType::Write).await.unwrap();
+			let txn =
+				crate::kvs::migration::transaction(&ds, TransactionType::Write).await.unwrap();
 			let (ns, db) = {
 				let db = txn.expect_db_by_name("test", "test").await.unwrap();
 				(db.namespace_id, db.database_id)

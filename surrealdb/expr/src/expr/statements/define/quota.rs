@@ -1,9 +1,8 @@
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
-use crate::expr::CoverStmts;
-use crate::expr::Expr;
 use crate::expr::statements::quota::QuotaRule;
+use crate::expr::{CoverStmts, Expr};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DefineQuotaStatement {

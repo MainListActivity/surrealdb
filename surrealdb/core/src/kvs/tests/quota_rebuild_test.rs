@@ -1,11 +1,10 @@
-use surrealdb_types::ToSql;
+use surrealdb_kvs::TransactionType;
+use surrealdb_types::{ToSql, Value};
 
 use crate::catalog::providers::DatabaseProvider;
 use crate::dbs::Session;
 use crate::iam::{Level, Role};
 use crate::kvs::Datastore;
-use surrealdb_kvs::TransactionType;
-use surrealdb_types::Value;
 
 async fn query_value(ds: &Datastore, sql: &str, session: &Session) -> Value {
 	ds.execute(sql, session, None).await.unwrap().remove(0).result.unwrap()

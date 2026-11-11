@@ -66,6 +66,17 @@ capability document, compatibility manifest, fork release, and source all use
 the same full Git SHA and release. Deploy the `repository@sha256:...` reference
 from this manifest, never a tag.
 
+After production acceptance, the stable GitHub Release is assembled as a draft
+from the same candidate: it includes the two CLI archives, checksum and Sigstore
+sidecars, compatibility/capability documents, supply-chain evidence and signed
+promotion receipts. Before publishing, the workflow re-downloads the draft assets
+by authenticated asset ID, verifies their bytes, signed-candidate hashes and CLI
+signatures, checks the ELF architecture and runs each CLI version (arm64 under
+QEMU) against the release and source SHA. It publishes the verified draft as the
+latest stable release, then downloads and verifies the published assets again.
+An interrupted draft or existing release with missing or changed assets fails
+closed; it is never silently repaired by overwriting an immutable artifact.
+
 ## Promotion
 
 Create GitHub environments named:

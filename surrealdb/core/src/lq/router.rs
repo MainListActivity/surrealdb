@@ -261,8 +261,8 @@ impl LiveQueryRouter {
 /// A lap delivers every `lqe` event with a versionstamp in `(cursor, W]`, where
 /// `W` is the durable LIVE fence (`Transaction::live_query_watermark`) read in
 /// this pass's snapshot — the stamp through which event commits are final and
-/// visible in that snapshot. Bounding delivery and cursor advancement by `W` (rather than by the highest event
-/// seen) is what makes this correct on a backend whose commit log is non-linear:
+/// visible in that snapshot. Bounding delivery and cursor advancement by `W` (rather than by the
+/// highest event seen) is what makes this correct on a backend whose commit log is non-linear:
 /// the router never advances past a commit that could still become visible later
 /// with a lower versionstamp. A monotonic oracle alone does not supply this
 /// guarantee: pre-commit event stamps and an older read snapshot must both be

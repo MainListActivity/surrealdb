@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
+use common::mem_registry::{MemoryReporter, cleanup_memory_reporters, register_memory_reporter};
 use rocksdb::{BlockBasedIndexType, BlockBasedOptions, Cache, Options, WriteBufferManager};
 
 use super::TARGET;
 use crate::kvs::Result;
 use crate::kvs::rocksdb::RocksDbConfig;
-use common::mem_registry::{MemoryReporter, cleanup_memory_reporters, register_memory_reporter};
 
 pub(super) struct MemoryManager {
 	/// The write buffer manager

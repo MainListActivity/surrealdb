@@ -390,6 +390,7 @@ type ResourceKind enum since=4.0 reserved=[]
   19 Bucket unit since=4.0
   20 Sequence unit since=4.0
   21 Actor unit since=4.0
+  22 Quota unit since=4.0
 type Role enum since=4.0 reserved=[]
   1 Viewer unit since=4.0
   2 Editor unit since=4.0

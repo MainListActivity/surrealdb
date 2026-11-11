@@ -3591,10 +3591,11 @@ impl Text for crate::exec::vm::quota::QuotaCommand {
 	}
 	fn get(c: &mut Cursor<'_>) -> Result<Self, ParseError> {
 		use crate::expr::Expr;
-		use crate::expr::statements::{
-			InfoStatement, alter::AlterStatement, define::DefineStatement,
-			rebuild::RebuildStatement, remove::RemoveStatement,
-		};
+		use crate::expr::statements::InfoStatement;
+		use crate::expr::statements::alter::AlterStatement;
+		use crate::expr::statements::define::DefineStatement;
+		use crate::expr::statements::rebuild::RebuildStatement;
+		use crate::expr::statements::remove::RemoveStatement;
 		match Expr::get(c)? {
 			Expr::Define(stmt) => {
 				if let DefineStatement::Quota(q) = *stmt {

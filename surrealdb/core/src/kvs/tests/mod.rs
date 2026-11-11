@@ -105,9 +105,11 @@ mod warm_write_reads_test;
 #[cfg(feature = "kv-mem")]
 mod write_guard_test;
 
-use super::Datastore;
 use std::future::Future;
+
 use uuid::Uuid;
+
+use super::Datastore;
 macro_rules! include_tests { ($new_ds:ident => $($name:ident),* $(,)?) => { $(super::$name::define_tests!($new_ds);)* }; }
 #[cfg(any(feature = "kv-mem", feature = "kv-rocksdb", feature = "kv-tikv"))]
 mod quota_backend_contract;

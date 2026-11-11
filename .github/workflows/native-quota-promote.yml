@@ -401,7 +401,7 @@ jobs:
           "promotion-${TARGET}.json"
           "promotion-${TARGET}.sigstore.json"
 
-      - name: Create stable release after downstream production acceptance
+      - name: Publish and re-download verified stable release assets
         if: needs.verify.outputs.target == 'production'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -412,20 +412,119 @@ jobs:
         run: |
           set -euo pipefail
           stable_tag="sck-${RELEASE}"
-          if gh release view "$stable_tag" >/dev/null 2>&1; then
-            target="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${stable_tag}" --jq '.target_commitish')"
-            test "$target" = "$SHA" || {
-              echo "::error::stable release $stable_tag targets $target instead of $SHA"
-              exit 1
-            }
-            echo "Verified existing stable release $stable_tag after an interrupted promotion run."
-            exit 0
+          source_dir="${PWD}/stable-candidate-assets"
+          downloaded_dir="${PWD}/stable-downloaded-assets"
+          mkdir -p "$source_dir" "$downloaded_dir"
+          assets=(
+            native-quota-release-candidate.json
+            native-quota-release-candidate.sigstore.json
+            native-quota-v1.json
+            native-quota-capabilities.json
+            native-quota-image.spdx.json
+            native-quota-image.provenance.intoto.jsonl
+            native-quota-image.index.json
+            native-quota-image.vulnerabilities.json
+            image-signature-verification.json
+            promotion-canary.json promotion-canary.sigstore.json
+            promotion-staging.json promotion-staging.sigstore.json
+            promotion-production.json promotion-production.sigstore.json
+          )
+          for arch in amd64 arm64; do
+            assets+=("surreal-native-quota.linux-${arch}.tgz")
+            assets+=("surreal-native-quota.linux-${arch}.txt")
+            assets+=("surreal-native-quota.linux-${arch}.tgz.sigstore.json")
+          done
+          patterns=()
+          for asset in "${assets[@]}"; do patterns+=(--pattern "$asset"); done
+          gh release download "$CANDIDATE_TAG" --dir "$source_dir" "${patterns[@]}"
+
+          # These inputs were verified in the preceding jobs, including the signed
+          # candidate and the exact canary/staging/production promotion receipts.
+          for asset in native-quota-release-candidate.json native-quota-release-candidate.sigstore.json native-quota-v1.json promotion-{canary,staging,production}.{json,sigstore.json}; do
+            cmp -- "$asset" "$source_dir/$asset"
+          done
+          candidate_identity="^https://github\\.com/${GITHUB_REPOSITORY}/\\.github/workflows/native-quota-candidate\\.yml@refs/heads/(main|releases/sck-[0-9]+\\.[0-9]+)$"
+          verify_download() {
+            local directory="$1"
+            python3 scripts/native-quota/verify_stable_cli_assets.py \
+              --candidate native-quota-release-candidate.json --directory "$directory" --verify-evidence
+            for arch in amd64 arm64; do
+              local archive="$directory/surreal-native-quota.linux-${arch}.tgz"
+              cosign verify-blob --bundle "${archive}.sigstore.json" \
+                --certificate-identity-regexp "$candidate_identity" \
+                --certificate-oidc-issuer "https://token.actions.githubusercontent.com" "$archive"
+              local unpack="$directory/unpacked-${arch}"
+              mkdir -p "$unpack"
+              tar -xzf "$archive" -C "$unpack"
+              local output
+              if [ "$arch" = amd64 ]; then
+                output="$("$unpack/surreal" version)"
+              else
+                output="$(docker run --rm --platform linux/arm64 \
+                  -v "$unpack/surreal:/surreal:ro" --entrypoint /surreal "$IMAGE_REFERENCE" version)"
+              fi
+              grep -F -- "$RELEASE" <<<"$output"
+              grep -F -- "${SHA:0:12}" <<<"$output"
+            done
+          }
+          verify_download "$source_dir"
+
+          find_release() {
+            # The tag endpoint only returns published releases; listing also
+            # exposes drafts to this authenticated contents-write job.
+            gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" |
+              jq -sc --arg tag "$stable_tag" \
+                '[.[][] | select(.tag_name == $tag)] | if length == 0 then empty elif length == 1 then .[0] else error("duplicate release tag") end'
+          }
+          release_json="$(find_release)"
+          if [ -z "$release_json" ]; then
+            paths=()
+            for asset in "${assets[@]}"; do paths+=("$source_dir/$asset"); done
+            gh release create "$stable_tag" "${paths[@]}" \
+              --target "$SHA" --draft --title "$stable_tag" \
+              --notes "Promoted from $CANDIDATE_TAG after signed surreal_ck acceptance. Production reference: $IMAGE_REFERENCE. Datastore format downgrade is not supported."
+            release_json="$(find_release)"
           fi
-          gh release create "$stable_tag" \
-            --target "$SHA" \
-            --title "$stable_tag" \
-            --latest=false \
-            --notes "Promoted from $CANDIDATE_TAG after signed surreal_ck acceptance. Production reference: \`$IMAGE_REFERENCE\`. Datastore format downgrade is not supported."
+          test -n "$release_json"
+          release_id="$(jq -er '.id' <<<"$release_json")"
+          target="$(jq -er '.target_commitish' <<<"$release_json")"
+          draft="$(jq -er '.draft | tostring' <<<"$release_json")"
+          test "$target" = "$SHA" || {
+            echo "::error::stable release $stable_tag targets $target instead of $SHA"
+            exit 1
+          }
+
+          # Drafts are not available through the public release-by-tag API.
+          # Download the authenticated assets by immutable ID, suppressing
+          # redirect diagnostics so temporary signed URLs cannot enter logs.
+          for asset in "${assets[@]}"; do
+            asset_id="$(jq -er --arg name "$asset" \
+              '[.assets[] | select(.name == $name)] | if length == 1 then .[0].id else error("missing or duplicate asset") end' \
+              <<<"$release_json")"
+            if ! gh api -H 'Accept: application/octet-stream' \
+              "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}" \
+              > "$downloaded_dir/$asset" 2>/dev/null; then
+              echo "::error::could not download release asset $asset"
+              exit 1
+            fi
+            cmp -- "$source_dir/$asset" "$downloaded_dir/$asset"
+          done
+          verify_download "$downloaded_dir"
+          if [ "$draft" = true ]; then
+            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/${release_id}" \
+              -F draft=false -f make_latest=true >/dev/null
+          fi
+          gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}" \
+            --jq '.draft == false' | grep -Fx true
+          gh api "repos/${GITHUB_REPOSITORY}/releases/latest" \
+            --jq '.id' | grep -Fx "$release_id"
+
+          # Verify the published download path too, not just the draft assets.
+          public_dir="${PWD}/stable-public-download"
+          mkdir -p "$public_dir"
+          gh release download "$stable_tag" --dir "$public_dir" "${patterns[@]}"
+          for asset in "${assets[@]}"; do cmp -- "$source_dir/$asset" "$public_dir/$asset"; done
+          verify_download "$public_dir"
 
       - name: Upload promotion receipt
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0

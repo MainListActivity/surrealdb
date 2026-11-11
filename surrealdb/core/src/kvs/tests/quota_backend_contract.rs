@@ -1,18 +1,17 @@
-use super::QuotaTransactionTestExt;
 use std::sync::Arc;
 
+use surrealdb_kvs::TransactionType;
+use surrealdb_strand::TableName;
 use tokio::sync::Barrier;
 use uuid::Uuid;
 
-use super::CreateDs;
+use super::{CreateDs, QuotaTransactionTestExt};
 use crate::catalog::QuotaUsageState;
 use crate::catalog::providers::DatabaseProvider;
 use crate::dbs::Session;
 use crate::kvs::Datastore;
 use crate::kvs::quota::QuotaUsageSnapshot;
 use crate::kvs::testing::{QuotaFaultSite, inject_quota_fault};
-use surrealdb_kvs::TransactionType;
-use surrealdb_strand::TableName;
 
 async fn setup(new_ds: impl CreateDs, node_id: Uuid) -> std::sync::Arc<Datastore> {
 	let (ds, _) = new_ds.create_ds(node_id).await;

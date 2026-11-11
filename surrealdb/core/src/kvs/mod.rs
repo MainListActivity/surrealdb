@@ -156,4 +156,5 @@ mod retry_conflict_tests {
 
 mod native_quota;
 pub use native_quota::*;
+#[cfg(test)]
 pub(crate) use surrealdb_datastore::quota;

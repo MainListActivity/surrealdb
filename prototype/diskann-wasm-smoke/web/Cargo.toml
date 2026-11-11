@@ -3,6 +3,9 @@ name = "diskann-web-guest"
 version = "0.0.0"
 edition = "2024"
 publish = false
+[package.metadata.cargo-machete]
+# Referenced by wasm-bindgen generated code for exported async functions.
+ignored = ["wasm-bindgen-futures"]
 [lib]
 crate-type = ["cdylib"]
 [dependencies]

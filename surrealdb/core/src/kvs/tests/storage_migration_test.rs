@@ -1,16 +1,17 @@
-use crate::catalog::QuotaUsageState;
-use crate::catalog::providers::DatabaseProvider;
-use crate::dbs::Session;
-use crate::key::schema::ForkStorageKey;
-use crate::key::schema::QuotaUsageMetaKey;
-use crate::key::schema::VersionKey;
-use crate::key::schema::{FieldKey, NativeQuotaMigrationKey};
-use crate::kvs::{Datastore, NativeQuotaMigrationOptions, NativeQuotaStorageState};
 use std::borrow::Cow;
+
 use surrealdb_datastore::fork_storage::{ForkMigrationState, ForkStorageFormat};
 use surrealdb_datastore::version::MajorVersion;
 use surrealdb_kvs::TransactionType;
 use surrealdb_kvs::key::KVKey;
+
+use crate::catalog::QuotaUsageState;
+use crate::catalog::providers::DatabaseProvider;
+use crate::dbs::Session;
+use crate::key::schema::{
+	FieldKey, ForkStorageKey, NativeQuotaMigrationKey, QuotaUsageMetaKey, VersionKey,
+};
+use crate::kvs::{Datastore, NativeQuotaMigrationOptions, NativeQuotaStorageState};
 
 async fn legacy_datastore() -> std::sync::Arc<Datastore> {
 	synthetic_datastore(false).await

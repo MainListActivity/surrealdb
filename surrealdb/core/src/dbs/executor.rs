@@ -3550,8 +3550,8 @@ impl Executor {
 	///
 	/// Storage conflicts allow `STATEMENT_CONFLICT_ATTEMPTS` attempts; quota
 	/// conflicts allow `QUOTA_CONFLICT_ATTEMPTS`. All attempts share one
-	/// transaction-timeout budget as a bare `LIVE` or `KILL`'s do (see [`Self::execute_live_or_kill`]). An attempt is not
-	/// followed by another when it:
+	/// transaction-timeout budget as a bare `LIVE` or `KILL`'s do (see
+	/// [`Self::execute_live_or_kill`]). An attempt is not followed by another when it:
 	/// - reached outside its transaction ([`Transaction::note_external_effect`]): a request sent or
 	///   a bucket written is not undone by the lost commit, and a second attempt would repeat it;
 	/// - committed and then left work to await (a blocking index build): the conflict is that

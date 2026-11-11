@@ -564,9 +564,10 @@ impl Error {
 
 	/// Returns the stable native quota error contract, if present.
 	pub fn quota_details(&self) -> Option<&QuotaError> {
-		match &self.details {
-			ErrorDetails::Quota(details) => Some(details),
-			_ => None,
+		if let ErrorDetails::Quota(details) = &self.details {
+			Some(details)
+		} else {
+			None
 		}
 	}
 }
@@ -1438,7 +1439,7 @@ pub fn union_conversion_error(expected: Kind, value: impl Into<Value>) -> Error 
 #[cfg(test)]
 mod tests {
 	use super::{Error, QueryError, Value, code};
-	use crate::Object;
+	use crate::{Object, QuotaError, SurrealValue};
 
 	/// The legacy numeric code is what a consumer predating the structured
 	/// model still reads, so an error rebuilt from its kind and details has to

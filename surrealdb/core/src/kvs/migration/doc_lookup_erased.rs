@@ -475,7 +475,7 @@ mod tests {
 			)
 			.await
 			.unwrap();
-			let txn = crate::kvs::migration::transaction(ds, TransactionType::Read).await.unwrap();
+			let txn = crate::kvs::migration::transaction(&ds, TransactionType::Read).await.unwrap();
 			let ns = txn.all_ns(None).await.unwrap()[0].namespace_id;
 			let db = txn.all_db(ns, None).await.unwrap()[0].database_id;
 			txn.cancel().await.unwrap();

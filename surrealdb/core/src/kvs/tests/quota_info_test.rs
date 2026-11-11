@@ -1,14 +1,13 @@
 use std::sync::{Arc, Mutex};
 
-use surrealdb_types::ToSql;
+use surrealdb_kvs::TransactionType;
+use surrealdb_types::{ToSql, Value};
 
 use crate::catalog::providers::DatabaseProvider;
 use crate::dbs::Session;
 use crate::iam::{Level, Role};
 use crate::kvs::Datastore;
 use crate::observe::{ExecutionObserver, QuotaEvent, QuotaEventKind, QuotaEventOutcome};
-use surrealdb_kvs::TransactionType;
-use surrealdb_types::Value;
 
 #[derive(Default)]
 struct CapturingQuotaObserver {

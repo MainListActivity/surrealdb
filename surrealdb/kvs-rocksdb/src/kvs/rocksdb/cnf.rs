@@ -1,9 +1,10 @@
 use std::str::FromStr;
 use std::time::Duration;
 
-use crate::kvs::config::{SyncMode, parse_duration};
 use common::sys::TOTAL_SYSTEM_MEMORY;
 use surrealdb_cnf::Config;
+
+use crate::kvs::config::{SyncMode, parse_duration};
 
 const KIB: u64 = 1024;
 const MIB: u64 = 1024 * KIB;
@@ -767,9 +768,10 @@ impl Config for RocksDbConfig {
 mod test {
 	use std::time::Duration;
 
+	use surrealdb_cnf::ConfigMap;
+
 	use crate::kvs::config::SyncMode;
 	use crate::kvs::rocksdb::RocksDbConfig;
-	use surrealdb_cnf::ConfigMap;
 
 	#[test]
 	fn test_rocksdb_config_defaults() {

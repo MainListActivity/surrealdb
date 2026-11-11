@@ -2,12 +2,13 @@
 use std::borrow::Cow;
 use std::sync::Arc;
 
+use surrealdb_strand::TableName;
+
 use super::*;
 use crate::dbs::Session;
 use crate::key::KVKey;
 use crate::key::schema::{FieldKey, MigrationKey, StoreDefaultsKey};
 use crate::kvs::version::{MigrationRecord, StoreDefaults};
-use surrealdb_strand::TableName;
 
 fn options() -> NativeQuotaMigrationOptions {
 	NativeQuotaMigrationOptions {

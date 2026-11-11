@@ -1,7 +1,6 @@
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::expr::CoverStmts;
-use crate::expr::Expr;
+use crate::expr::{CoverStmts, Expr};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct RemoveQuotaStatement {

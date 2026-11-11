@@ -15,8 +15,8 @@ use crate::ntw::error::Error as NetError;
 
 /// The `/ready` route: the Kubernetes startup/readiness signal.
 ///
-/// Returns `200` only once the instance has finished starting up (datastore initialisation, import +
-/// credentials), the native quota storage/backend contract is ready, and,
+/// Returns `200` only once the instance has finished starting up (datastore initialisation, import
+/// + credentials), the native quota storage/backend contract is ready, and,
 /// when a heartbeat budget is configured, the current node's cluster heartbeat
 /// is fresh. Additional comma-separated capability requirements can be supplied
 /// with `?require=...`. Returns `503` when any required contract is unavailable.

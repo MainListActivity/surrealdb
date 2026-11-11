@@ -1,3 +1,5 @@
+use surrealdb_kvs::TransactionType;
+use surrealdb_strand::TableName;
 use temp_dir::TempDir;
 use uuid::Uuid;
 
@@ -5,8 +7,6 @@ use crate::catalog::QuotaUsageState;
 use crate::catalog::providers::DatabaseProvider;
 use crate::dbs::Session;
 use crate::kvs::Datastore;
-use surrealdb_kvs::TransactionType;
-use surrealdb_strand::TableName;
 
 const CRASH_CHILD_PATH: &str = "SURREAL_QUOTA_ROCKSDB_CRASH_CHILD_PATH";
 const CERTIFICATION_TEST: &str = concat!(

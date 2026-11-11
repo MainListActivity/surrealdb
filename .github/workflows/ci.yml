@@ -966,8 +966,22 @@ jobs:
       # without bumping its version, so it's surfaced at review time instead of
       # only on main / at release time. Reads crates.io only (no secrets), so
       # this also runs on fork PRs.
-      - name: Check crate versions
+      - name: Check crates.io versions for upstream releases
+        if: github.repository != 'MainListActivity/surrealdb'
         uses: ./.github/actions/check-crate-versions
+
+      - name: Check private fork package metadata
+        if: github.repository == 'MainListActivity/surrealdb'
+        run: |
+          set -euo pipefail
+          # The fork publishes signed binaries/images, not crates.io packages.
+          # Its private KVS crates intentionally have no crates.io version, so
+          # upstream cargo-package registry resolution is not applicable.
+          cargo metadata --locked --no-deps --format-version 1 | jq -e '
+            (.packages[] | select(.name == "surreal-db") | .version) as $version
+            | [.packages[] | select(.name == "surreal-db" or .name == "surrealdb-kvs-rocksdb" or .name == "surrealdb-kvs-tikv")]
+            | length == 3 and all(.[]; .publish == [] and .version == $version)
+          ' >/dev/null
 
   # ----------------------------------------
   # Lockfile freshness

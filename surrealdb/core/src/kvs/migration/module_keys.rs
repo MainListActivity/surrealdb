@@ -320,7 +320,8 @@ mod tests {
 		async fn fixture() -> (Arc<Datastore>, NamespaceId, DatabaseId) {
 			let ds = Datastore::new("memory").await.unwrap();
 			let (ns, db) = (NamespaceId(1), DatabaseId(1));
-			let txn = crate::kvs::migration::transaction(ds, TransactionType::Write).await.unwrap();
+			let txn =
+				crate::kvs::migration::transaction(&ds, TransactionType::Write).await.unwrap();
 			txn.put_ns(NamespaceDefinition {
 				namespace_id: ns,
 				name: "test".into(),
@@ -481,7 +482,8 @@ mod tests {
 		async fn each_database_is_migrated() {
 			let (ds, ns, db) = fixture().await;
 			let other = DatabaseId(2);
-			let txn = crate::kvs::migration::transaction(ds, TransactionType::Write).await.unwrap();
+			let txn =
+				crate::kvs::migration::transaction(&ds, TransactionType::Write).await.unwrap();
 			txn.put_db(
 				"other",
 				DatabaseDefinition {
@@ -514,7 +516,8 @@ mod tests {
 			let (ds, ns, db) = fixture().await;
 			write_at(&ds, ns, db, LEGACY_SILO, &silo(1, 2, 3)).await;
 			let junk = ModuleKey::new(ns, db, Cow::Borrowed("mod::junk")).encode_key().unwrap();
-			let txn = crate::kvs::migration::transaction(ds, TransactionType::Write).await.unwrap();
+			let txn =
+				crate::kvs::migration::transaction(&ds, TransactionType::Write).await.unwrap();
 			txn.set(junk.clone(), b"not a module definition".to_vec()).await.unwrap();
 			txn.commit().await.unwrap();
 
@@ -545,7 +548,7 @@ mod tests {
 
 			assert_eq!(names(&ds, ns, db).await, vec![DERIVED_SILO]);
 			// Recorded, so a restart does not walk the band again.
-			let txn = crate::kvs::migration::transaction(ds, TransactionType::Read).await.unwrap();
+			let txn = crate::kvs::migration::transaction(&ds, TransactionType::Read).await.unwrap();
 			let recorded = txn.exists_key(&MigrationKey::new(2), None).await.unwrap();
 			txn.cancel().await.unwrap();
 			assert!(recorded);

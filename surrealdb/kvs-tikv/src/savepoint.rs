@@ -210,4 +210,3 @@ mod tests {
 		assert!(log.take_savepoint().is_none());
 	}
 }
-

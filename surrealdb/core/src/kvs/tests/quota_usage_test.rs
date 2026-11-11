@@ -1,14 +1,14 @@
-use crate::catalog::QuotaUsageState;
-use crate::catalog::providers::DatabaseProvider;
-use crate::dbs::Session;
-use crate::key::schema::QuotaRecordUsageKey;
-use crate::key::schema::QuotaTableBucketKey;
-use crate::kvs::Datastore;
 use surrealdb_datastore::quota::QuotaUsageSnapshot;
 use surrealdb_kvs::TransactionType;
 use surrealdb_kvs::key::KVKey;
 use surrealdb_strand::TableName;
 use surrealdb_types::Value as PublicValue;
+
+use crate::catalog::QuotaUsageState;
+use crate::catalog::providers::DatabaseProvider;
+use crate::dbs::Session;
+use crate::key::schema::{QuotaRecordUsageKey, QuotaTableBucketKey};
+use crate::kvs::Datastore;
 
 async fn setup()
 -> (std::sync::Arc<Datastore>, crate::catalog::NamespaceId, crate::catalog::DatabaseId) {

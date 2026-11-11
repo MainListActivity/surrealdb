@@ -3,6 +3,7 @@
 #![recursion_limit = "256"]
 use std::future::Future;
 use std::sync::Arc;
+
 use surrealdb_catalog as catalog;
 use surrealdb_core::dbs;
 use uuid::Uuid;
@@ -99,8 +100,9 @@ mod rocksdb {
 }
 #[cfg(feature = "kv-tikv")]
 mod tikv {
-	use super::*;
 	use surrealdb_kvs::TransactionType;
+
+	use super::*;
 	async fn new_ds(id: Uuid) -> (Arc<Datastore>, ()) {
 		assert_eq!(
 			std::env::var("SURREAL_TIKV_TEST_ALLOW_DESTRUCTIVE").as_deref(),

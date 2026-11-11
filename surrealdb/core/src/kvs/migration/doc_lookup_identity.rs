@@ -341,7 +341,7 @@ mod tests {
 			.await
 			.unwrap();
 		let (ns, db) = {
-			let txn = crate::kvs::migration::transaction(ds, TransactionType::Read).await.unwrap();
+			let txn = crate::kvs::migration::transaction(&ds, TransactionType::Read).await.unwrap();
 			let ns = txn.all_ns(None).await.unwrap()[0].namespace_id;
 			let db = txn.all_db(ns, None).await.unwrap()[0].database_id;
 			txn.cancel().await.unwrap();
@@ -356,12 +356,13 @@ mod tests {
 		// catalog walk to reach it.
 		ds.execute("USE NS n DB d; DEFINE TABLE t;", &Default::default(), None).await.unwrap();
 		{
-			let txn = crate::kvs::migration::transaction(ds, TransactionType::Write).await.unwrap();
+			let txn =
+				crate::kvs::migration::transaction(&ds, TransactionType::Write).await.unwrap();
 			txn.set_key(&DocKeyKey::new(ns, db, Cow::Borrowed(&tb), 7), &int).await.unwrap();
 			txn.commit().await.unwrap();
 		}
 		{
-			let txn = crate::kvs::migration::transaction(ds, TransactionType::Read).await.unwrap();
+			let txn = crate::kvs::migration::transaction(&ds, TransactionType::Read).await.unwrap();
 			assert_eq!(
 				txn.get_key(
 					&DocLookupIdentityKey::new(
@@ -385,7 +386,7 @@ mod tests {
 		// Asserted on the injective key itself, which is what the migration
 		// writes.
 		let dj = DocLookupIdentityKey::new(ns, db, Cow::Borrowed(&tb), RecordIdentity(int.clone()));
-		let txn = crate::kvs::migration::transaction(ds, TransactionType::Read).await.unwrap();
+		let txn = crate::kvs::migration::transaction(&ds, TransactionType::Read).await.unwrap();
 		assert_eq!(
 			txn.get_key(&dj, None).await.unwrap(),
 			Some(7),
@@ -396,7 +397,7 @@ mod tests {
 
 		// Re-running writes the same bytes rather than a second mapping.
 		rebuild_forward_doc_ids_under_an_injective_key(&ds).await.unwrap();
-		let txn = crate::kvs::migration::transaction(ds, TransactionType::Read).await.unwrap();
+		let txn = crate::kvs::migration::transaction(&ds, TransactionType::Read).await.unwrap();
 		assert_eq!(txn.get_key(&dj, None).await.unwrap(), Some(7));
 		assert_eq!(docids.get_doc_id(&txn, &int).await.unwrap(), Some(7));
 		txn.cancel().await.unwrap();
@@ -419,7 +420,7 @@ mod tests {
 		.await
 		.unwrap();
 		let (ns, db) = {
-			let txn = crate::kvs::migration::transaction(ds, TransactionType::Read).await.unwrap();
+			let txn = crate::kvs::migration::transaction(&ds, TransactionType::Read).await.unwrap();
 			let ns = txn.all_ns(None).await.unwrap()[0].namespace_id;
 			let db = txn.all_db(ns, None).await.unwrap()[0].database_id;
 			txn.cancel().await.unwrap();
@@ -435,7 +436,8 @@ mod tests {
 		// A batch as the scan saw it, against a store where one record has since
 		// been deleted and the other re-created under a newer doc-ID.
 		{
-			let txn = crate::kvs::migration::transaction(ds, TransactionType::Write).await.unwrap();
+			let txn =
+				crate::kvs::migration::transaction(&ds, TransactionType::Write).await.unwrap();
 			// `deleted`: no reverse mapping at all any more.
 			// `recreated`: reverse mapping moved to doc 9, and its own `!dj` with it.
 			txn.set_key(&DocKeyKey::new(ns, db, Cow::Borrowed(&tb), 9), &recreated).await.unwrap();
@@ -447,7 +449,7 @@ mod tests {
 			vec![(Vec::new(), 7u64, deleted.clone()), (Vec::new(), 8u64, recreated.clone())];
 		assert_eq!(write_batch(&ds, ns, db, &tb, &stale).await.unwrap(), 0);
 
-		let txn = crate::kvs::migration::transaction(ds, TransactionType::Read).await.unwrap();
+		let txn = crate::kvs::migration::transaction(&ds, TransactionType::Read).await.unwrap();
 		assert_eq!(
 			txn.get_key(&key(&deleted), None).await.unwrap(),
 			None,
@@ -503,7 +505,8 @@ mod tests {
 		let (a, b): (TableName, TableName) = ("a".into(), "b".into());
 		let id = arr(Number::Int(1));
 		{
-			let txn = crate::kvs::migration::transaction(ds, TransactionType::Write).await.unwrap();
+			let txn =
+				crate::kvs::migration::transaction(&ds, TransactionType::Write).await.unwrap();
 			txn.set_key(&DocKeyKey::new(ns, db, Cow::Borrowed(&a), 7), &id).await.unwrap();
 			txn.set_key(&DocKeyKey::new(ns, db, Cow::Borrowed(&b), 8), &id).await.unwrap();
 			txn.commit().await.unwrap();
@@ -542,7 +545,8 @@ mod tests {
 		let tb: TableName = "t".into();
 		let (before, after) = (arr(Number::Int(1)), arr(Number::Int(2)));
 		{
-			let txn = crate::kvs::migration::transaction(ds, TransactionType::Write).await.unwrap();
+			let txn =
+				crate::kvs::migration::transaction(&ds, TransactionType::Write).await.unwrap();
 			txn.set_key(&DocKeyKey::new(ns, db, Cow::Borrowed(&tb), 4), &before).await.unwrap();
 			let garbage =
 				crate::key::KVKey::encode_key(&DocKeyKey::new(ns, db, Cow::Borrowed(&tb), 5))

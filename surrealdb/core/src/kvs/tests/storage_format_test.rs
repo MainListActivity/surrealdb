@@ -1,11 +1,11 @@
-use crate::catalog::Error;
-use crate::key::KVKey;
-use crate::key::schema::ForkStorageKey;
-use crate::key::schema::VersionKey;
-use crate::kvs::version::MajorVersion;
-use crate::kvs::{Datastore, TransactionType};
 use surrealdb_datastore::fork_storage::{ForkMigrationState, ForkStorageFormat};
 use surrealdb_kvs::value::KVValue;
+
+use crate::catalog::Error;
+use crate::key::KVKey;
+use crate::key::schema::{ForkStorageKey, VersionKey};
+use crate::kvs::version::MajorVersion;
+use crate::kvs::{Datastore, TransactionType};
 
 async fn write_format(ds: &Datastore, version: MajorVersion, marker: Option<ForkStorageFormat>) {
 	let tx = ds.transaction(TransactionType::Write).await.unwrap();
