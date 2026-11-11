@@ -205,11 +205,11 @@ jobs:
           MODULE: ${{ matrix.module }}
         run: |
           set -euo pipefail
-          prefix="kvs::tests::${MODULE}::quota_"
+          prefix="${MODULE}::quota_"
           tests="$(cargo test -p surrealdb-core \
             --no-default-features \
-            --features "$FEATURE" \
-            --lib \
+            --features "$FEATURE,test-hooks" \
+            --test native_quota_backends \
             -- --list)"
           count="$(grep -c "^${prefix}.*: test$" <<<"$tests" || true)"
           test "$count" -ge 5 || {
@@ -225,9 +225,9 @@ jobs:
           set -euo pipefail
           cargo test -p surrealdb-core \
             --no-default-features \
-            --features "$FEATURE" \
-            --lib \
-            "kvs::tests::${MODULE}::quota_" \
+            --features "$FEATURE,test-hooks" \
+            --test native_quota_backends \
+            "${MODULE}::quota_" \
             -- --test-threads=1
 
       - name: Run RocksDB crash/restart certification
@@ -235,7 +235,8 @@ jobs:
         run: >-
           cargo test -p surrealdb-core
           --no-default-features
-          --features kv-rocksdb
+          --features kv-rocksdb,test-hooks
+          --test native_quota_backends
           quota_rocksdb_certification
           -- --test-threads=1
 

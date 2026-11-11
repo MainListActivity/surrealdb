@@ -5,6 +5,7 @@ pub mod any;
 	feature = "kv-mem",
 	feature = "kv-surrealkv",
 	all(feature = "kv-tikv", not(target_family = "wasm")),
+	all(feature = "kv-rocksdb", not(target_family = "wasm")),
 ))]
 pub mod local;
 #[cfg(any(http_engine, ws_engine, feature = "protocol-grpc"))]
@@ -18,6 +19,7 @@ pub mod remote;
 		feature = "kv-mem",
 		feature = "kv-surrealkv",
 		all(feature = "kv-tikv", not(target_family = "wasm")),
+		all(feature = "kv-rocksdb", not(target_family = "wasm")),
 	)
 ))]
 #[doc(hidden)]

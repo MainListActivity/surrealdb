@@ -396,7 +396,7 @@ mod endpoint_tests {
 	/// `surrealkv` and open the same path with it.
 	#[test]
 	fn deprecated_schemes_open_with_surrealkv() {
-		for url in ["rocksdb://some/folder", "indxdb://name"] {
+		for url in ["indxdb://name"] {
 			let endpoint = __into_endpoint(url).unwrap();
 			assert!(
 				matches!(

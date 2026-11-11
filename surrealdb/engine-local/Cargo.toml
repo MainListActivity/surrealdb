@@ -17,6 +17,7 @@ categories.workspace = true
 # a datastore; which one is selected at runtime from the endpoint scheme.
 kv-mem = ["surrealdb-core/kv-mem"]
 kv-tikv = ["surrealdb-core/kv-tikv"]
+kv-rocksdb = ["surrealdb-core/kv-rocksdb"]
 kv-surrealkv = ["surrealdb-core/kv-surrealkv"]
 # Optional engine capabilities, forwarded to the database core.
 allocator = ["surrealdb-core/allocator"]

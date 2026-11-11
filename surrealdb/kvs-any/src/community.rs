@@ -69,7 +69,7 @@ impl BackendProvider for MemProvider {
 
 /// Provider for the SurrealKV storage engine.
 ///
-/// The `rocksdb` and `indxdb` schemes of earlier storage engines are claimed
+/// The `indxdb` scheme of an earlier storage engine is claimed
 /// too and open the same path with SurrealKV, which migrates what an earlier
 /// engine left there; they are deprecated spellings of `surrealkv`.
 #[cfg(feature = "kv-surrealkv")]
@@ -78,7 +78,7 @@ struct SurrealKvProvider;
 #[cfg(feature = "kv-surrealkv")]
 impl BackendProvider for SurrealKvProvider {
 	fn schemes(&self) -> &[&'static str] {
-		&["surrealkv", "rocksdb", "indxdb"]
+		&["surrealkv", "indxdb"]
 	}
 
 	fn connect<'a>(
@@ -86,7 +86,7 @@ impl BackendProvider for SurrealKvProvider {
 		ctx: ConnectContext<'a>,
 	) -> BoxFut<'a, Result<Box<dyn TransactionBuilder>>> {
 		Box::pin(async move {
-			if matches!(ctx.scheme, "rocksdb" | "indxdb") {
+			if ctx.scheme == "indxdb" {
 				warn!(
 					target: TARGET,
 					"The `{}` scheme is deprecated: the path is opened with SurrealKV, which \

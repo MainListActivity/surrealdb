@@ -82,6 +82,12 @@ impl conn::Sealed for Any {
 			));
 				}
 
+				EndpointKind::RocksDb => {
+					return Err(Error::internal(
+						"RocksDB is not available on wasm targets".to_owned(),
+					));
+				}
+
 				EndpointKind::TiKv => {
 					return Err(Error::internal(
 						"The `tikv` storage engine is not available in the SDK. Connect to a SurrealDB server built with TiKV support over `ws://` or `http://` instead".to_owned(),

@@ -1308,6 +1308,12 @@ pub trait TransactionBuilderFactory: Send + Sync + 'static {
 /// Build the same registry for path validation and connection creation.
 fn community_backends() -> surrealdb_kvs_any::Backends<'static> {
 	let backends = surrealdb_kvs_any::Backends::community();
+	#[cfg(feature = "kv-rocksdb")]
+	let backends = {
+		let mut backends = backends;
+		backends.register(surrealdb_kvs_rocksdb::RocksDbProvider);
+		backends
+	};
 	#[cfg(feature = "kv-tikv")]
 	let backends = {
 		let mut backends = backends;
@@ -2118,9 +2124,9 @@ impl Datastore {
 	/// id, index builder, index stores, datastore cache, sequences, and other
 	/// process-local caches. Tests that exercise cluster liveness should call
 	/// [`Self::insert_node`] for both the original datastore and the fork.
-	#[cfg(test)]
-	#[cfg_attr(not(feature = "kv-mem"), allow(dead_code))]
-	pub(crate) fn fork_for_test_with_node_id(&self, id: Uuid) -> Self {
+	#[cfg(any(test, feature = "test-hooks"))]
+	#[doc(hidden)]
+	pub fn fork_for_test_with_node_id(&self, id: Uuid) -> Self {
 		let transaction_factory = self.transaction_factory.clone();
 		let function_registry = Arc::new(FunctionRegistry::with_builtins());
 		Self {

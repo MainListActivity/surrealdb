@@ -8,9 +8,10 @@ use super::CreateDs;
 use crate::catalog::QuotaUsageState;
 use crate::catalog::providers::DatabaseProvider;
 use crate::dbs::Session;
+use crate::kvs::Datastore;
 use crate::kvs::quota::QuotaUsageSnapshot;
 use crate::kvs::testing::{QuotaFaultSite, inject_quota_fault};
-use crate::kvs::{Datastore, TransactionType};
+use surrealdb_kvs::TransactionType;
 use surrealdb_strand::TableName;
 
 async fn setup(new_ds: impl CreateDs, node_id: Uuid) -> std::sync::Arc<Datastore> {
@@ -139,9 +140,13 @@ pub async fn no_policy_metering_and_regex_contract(new_ds: impl CreateDs) {
 	.await
 	.unwrap();
 
-	statement_result(&ds, "DEFINE FIELD email ON ent_user TYPE string", &db_owner).await.unwrap();
-	let field_error =
-		statement_error(&ds, "DEFINE FIELD phone ON ent_user TYPE string", &db_owner).await;
+	statement_result(&ds, "DEFINE FIELD email ON ent_user TYPE string MIGRATE EXISTING ROWS AS add_email USING 'unknown@example.test'", &db_owner).await.unwrap();
+	let field_error = statement_error(
+		&ds,
+		"DEFINE FIELD phone ON ent_user TYPE string MIGRATE EXISTING ROWS AS add_phone USING 'unknown'",
+		&db_owner,
+	)
+	.await;
 	assert!(field_error.contains("ent_fields"), "{field_error}");
 
 	statement_result(

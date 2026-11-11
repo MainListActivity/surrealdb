@@ -8816,6 +8816,16 @@ impl Transaction {
 		let value_bytes = val.len() as u64;
 		self.note_written_key(&key);
 		let defined = self.changed_definition(&key, Some(&val), prior).await?;
+		// v4 VM writes use encoded/held APIs, bypassing TableProvider.
+		#[cfg(any(test, feature = "test-hooks"))]
+		let business_record = RecordKey::decode_key(&key).is_ok();
+		#[cfg(any(test, feature = "test-hooks"))]
+		if business_record {
+			maybe_inject_quota_fault(
+				QuotaFaultSite::BeforeBusinessMutation,
+				self.sequences.node_id(),
+			)?;
+		}
 		match op {
 			WriteOp::Set => {
 				self.tr.set(key, val).await?;
@@ -8833,6 +8843,13 @@ impl Transaction {
 				self.tr.replace(key, val).await?;
 				self.metrics.record_put(key_bytes, value_bytes);
 			}
+		}
+		#[cfg(any(test, feature = "test-hooks"))]
+		if business_record {
+			maybe_inject_quota_fault(
+				QuotaFaultSite::AfterBusinessMutation,
+				self.sequences.node_id(),
+			)?;
 		}
 		self.restamp_defined(defined).await
 	}

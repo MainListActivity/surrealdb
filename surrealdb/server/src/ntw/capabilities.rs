@@ -2,7 +2,7 @@
 
 use axum::routing::get;
 use axum::{Extension, Json, Router};
-use surrealdb_core::dbs::capabilities::RouteTarget;
+use surrealdb_rpc::capabilities::RouteTarget;
 
 use super::AppState;
 use crate::capability::CapabilityDocument;

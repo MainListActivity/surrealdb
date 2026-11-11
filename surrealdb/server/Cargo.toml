@@ -47,6 +47,7 @@ scripting = ["surrealdb-core/scripting"]
 surrealism = ["surrealdb-core/surrealism"]
 storage-mem = ["surrealdb/kv-mem", "surrealdb-core/kv-mem"]
 storage-tikv = ["surrealdb/kv-tikv", "surrealdb-core/kv-tikv"]
+storage-rocksdb = ["surrealdb/kv-rocksdb", "surrealdb-core/kv-rocksdb"]
 storage-surrealkv = ["surrealdb/kv-surrealkv", "surrealdb-core/kv-surrealkv"]
 # GraphQL API support
 graphql = [
@@ -105,6 +106,7 @@ surrealdb-iam.workspace = true
 surrealdb-kvs.workspace = true
 surrealdb-observe.workspace = true
 surrealdb-rpc.workspace = true
+semver.workspace = true
 surrealdb-protocol = { workspace = true, features = ["rpc"] }
 surrealdb-types = { workspace = true, features = ["proto"] }
 surrealdb-pgwire = { workspace = true, optional = true, features = ["listener"] }

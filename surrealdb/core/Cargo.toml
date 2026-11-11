@@ -14,6 +14,8 @@ categories.workspace = true
 license-file.workspace = true
 
 [features]
+# Opt-in support for focused backend certification binaries; absent from releases.
+test-hooks = ["surrealdb-datastore/test-hooks"]
 # Public features
 default = [
     "kv-mem",
@@ -47,6 +49,7 @@ default = [
 # format is not offered, and a request for it is answered as for any unsupported format.
 shaped = []
 kv-tikv = ["dep:surrealdb-kvs-tikv", "tokio/time", "dep:tempfile", "dep:ext-sort"]
+kv-rocksdb = ["dep:surrealdb-kvs-rocksdb", "tokio/time", "dep:tempfile", "dep:ext-sort"]
 kv-mem = [
     "surrealdb-kvs-any/kv-mem",
     "tokio/time",
@@ -225,6 +228,7 @@ common = { workspace = true }
 # External surreal crates
 surrealdb-kvs-any = { workspace = true }
 surrealdb-kvs-tikv = { workspace = true, optional = true }
+surrealdb-kvs-rocksdb = { workspace = true, optional = true }
 
 arc-swap.workspace = true
 async-trait = { workspace = true, optional = true }
@@ -390,6 +394,11 @@ name = "surrealdb_core"
 name = "live_ordering"
 path = "tests/live_ordering.rs"
 required-features = ["kv-mem"]
+
+[[test]]
+name = "native_quota_backends"
+path = "tests/native_quota_backends.rs"
+required-features = ["test-hooks"]
 
 [[bench]]
 name = "allocator"

@@ -87,6 +87,27 @@ impl conn::Sealed for Any {
 					None,
 				));
 				}
+				EndpointKind::RocksDb => {
+					#[cfg(feature = "kv-rocksdb")]
+					{
+						features.insert(ExtraFeatures::Backup);
+						features.insert(ExtraFeatures::LiveQueries);
+						let engine = surrealdb_engine_local::connect(
+							engine::local::local_config(address),
+							session_clone.receiver.clone(),
+						)
+						.await?;
+						let router = Router::from_engine(engine, features, config);
+						let waiter = watch::channel(Some(WaitFor::Connection));
+						return Ok((router, waiter, session_clone).into());
+					}
+
+					#[cfg(not(feature = "kv-rocksdb"))]
+				return Err(Error::configuration(
+					"Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_string(),
+					None,
+				));
+				}
 
 				EndpointKind::SurrealKv => {
 					#[cfg(feature = "kv-surrealkv")]

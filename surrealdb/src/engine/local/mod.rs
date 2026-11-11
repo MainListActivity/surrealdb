@@ -281,6 +281,12 @@ pub struct SurrealKv;
 #[derive(Debug)]
 pub struct TiKv;
 
+/// An embedded RocksDB database. Requires the native `kv-rocksdb` feature.
+#[cfg(all(feature = "kv-rocksdb", not(target_family = "wasm")))]
+#[cfg_attr(docsrs, doc(cfg(feature = "kv-rocksdb")))]
+#[derive(Debug)]
+pub struct RocksDb;
+
 /// An embedded database
 #[derive(Debug, Clone)]
 pub struct Db(());

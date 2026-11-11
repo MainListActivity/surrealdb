@@ -7,6 +7,8 @@ mod ws;
 
 #[cfg(feature = "kv-mem")]
 mod mem;
+#[cfg(all(feature = "kv-rocksdb", not(target_family = "wasm")))]
+mod rocksdb;
 #[cfg(feature = "kv-surrealkv")]
 mod surrealkv;
 #[cfg(all(feature = "kv-tikv", not(target_family = "wasm")))]
@@ -15,7 +17,8 @@ mod tikv;
 #[cfg(any(
 	feature = "kv-mem",
 	feature = "kv-surrealkv",
-	all(feature = "kv-tikv", not(target_family = "wasm"))
+	all(feature = "kv-tikv", not(target_family = "wasm")),
+	all(feature = "kv-rocksdb", not(target_family = "wasm"))
 ))]
 mod local;
 
@@ -59,7 +62,8 @@ impl Endpoint {
 		not(any(
 			feature = "kv-mem",
 			feature = "kv-surrealkv",
-			all(feature = "kv-tikv", not(target_family = "wasm"))
+			all(feature = "kv-tikv", not(target_family = "wasm")),
+			all(feature = "kv-rocksdb", not(target_family = "wasm"))
 		)),
 		allow(dead_code)
 	)]
@@ -148,7 +152,7 @@ mod tests {
 	#[test]
 	fn test_deprecated_schemes_map_to_surrealkv() {
 		// The deprecated spellings still open the SurrealKV datastore
-		for scheme in ["surrealkv", "rocksdb", "indxdb"] {
+		for scheme in ["surrealkv", "indxdb"] {
 			assert!(
 				matches!(EndpointKind::from(scheme), EndpointKind::SurrealKv),
 				"`{scheme}` should map to SurrealKv"
@@ -170,6 +174,7 @@ pub enum EndpointKind {
 	Grpcs,
 	Memory,
 	TiKv,
+	RocksDb,
 	Unsupported(String),
 	SurrealKv,
 }
@@ -187,11 +192,12 @@ impl From<&str> for EndpointKind {
 			"grpcs" => Self::Grpcs,
 			"mem" => Self::Memory,
 			"tikv" => Self::TiKv,
+			"rocksdb" => Self::RocksDb,
 			"surrealkv" => Self::SurrealKv,
-			// `rocksdb` and `indxdb` are deprecated spellings of `surrealkv`. They still open
-			// the SurrealKV datastore, and are logged so that the connection string can change.
+			// `indxdb` remains a deprecated spelling of `surrealkv`. RocksDB has
+			// its own backend identity and must never enter this conversion path.
 			// Only the scheme is named, never the path.
-			"rocksdb" | "indxdb" => {
+			"indxdb" => {
 				tracing::warn!(
 					"The `{s}://` scheme is deprecated and will be removed. Use `surrealkv://` \
 					 instead: the database is opened as SurrealKV"

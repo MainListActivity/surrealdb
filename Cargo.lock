@@ -1049,6 +1049,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "bzip2-sys"
+version = "0.1.13+1.0.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "225bff33b2141874fe80d71e07d6eec4f85c5c216453dd96388240f96e1acc14"
+dependencies = [
+ "cc",
+ "pkg-config",
+]
+
+[[package]]
 name = "cap-primitives"
 version = "4.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3975,6 +3985,17 @@ dependencies = [
  "anstyle",
  "clap",
  "escape8259",
+]
+
+[[package]]
+name = "libz-sys"
+version = "1.1.33"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fee3f59f4321dab0c78d828942e7aa09d0bd8ad6e78a501977e6bf3d02938045"
+dependencies = [
+ "cc",
+ "pkg-config",
+ "vcpkg",
 ]
 
 [[package]]
@@ -7745,6 +7766,7 @@ dependencies = [
  "surrealdb-idx",
  "surrealdb-kvs",
  "surrealdb-kvs-any",
+ "surrealdb-kvs-rocksdb",
  "surrealdb-kvs-tikv",
  "surrealdb-mysql",
  "surrealdb-observe",
@@ -8094,6 +8116,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "surrealdb-kvs-rocksdb"
+version = "4.0.1"
+dependencies = [
+ "affinitypool",
+ "anyhow",
+ "bytes",
+ "futures",
+ "num_cpus",
+ "parking_lot",
+ "surrealdb-cnf",
+ "surrealdb-common",
+ "surrealdb-kvs",
+ "surrealdb-kvs-any",
+ "surrealdb-kvs-test",
+ "surrealdb-rocksdb",
+ "temp-dir",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "web-time",
+]
+
+[[package]]
 name = "surrealdb-kvs-surrealkv"
 version = "4.0.1"
 dependencies = [
@@ -8136,6 +8182,21 @@ dependencies = [
  "tokio-util",
  "tonic",
  "tracing",
+]
+
+[[package]]
+name = "surrealdb-librocksdb-sys"
+version = "0.18.3+11.0.0-4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "25b82a18c7fa4b57206784a1a31e7b942ae1d3e24493e0c733019a409b2b4bea"
+dependencies = [
+ "bindgen 0.72.1",
+ "bzip2-sys",
+ "cc",
+ "libc",
+ "libz-sys",
+ "lz4-sys",
+ "zstd-sys",
 ]
 
 [[package]]
@@ -8335,6 +8396,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "surrealdb-rocksdb"
+version = "0.24.0-surreal.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "02e8c3a004982458af159bcbf369e41663d538cd4a291a49c0d4a2fb373cbb7e"
+dependencies = [
+ "libc",
+ "surrealdb-librocksdb-sys",
+]
+
+[[package]]
 name = "surrealdb-rpc"
 version = "4.0.1"
 dependencies = [
@@ -8434,6 +8505,7 @@ dependencies = [
  "rstest",
  "rustls",
  "rustyline",
+ "semver",
  "serde",
  "serde_json",
  "serial_test",

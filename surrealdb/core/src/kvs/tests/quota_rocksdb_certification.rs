@@ -4,11 +4,15 @@ use uuid::Uuid;
 use crate::catalog::QuotaUsageState;
 use crate::catalog::providers::DatabaseProvider;
 use crate::dbs::Session;
-use crate::kvs::{Datastore, TransactionType};
+use crate::kvs::Datastore;
+use surrealdb_kvs::TransactionType;
 use surrealdb_strand::TableName;
 
 const CRASH_CHILD_PATH: &str = "SURREAL_QUOTA_ROCKSDB_CRASH_CHILD_PATH";
-const CERTIFICATION_TEST: &str = "kvs::tests::quota_rocksdb_certification::quota_persistent_restart_recovers_interrupted_rebuild_without_epoch_flip";
+const CERTIFICATION_TEST: &str = concat!(
+	module_path!(),
+	"::quota_persistent_restart_recovers_interrupted_rebuild_without_epoch_flip"
+);
 
 async fn open(path: &str) -> std::sync::Arc<Datastore> {
 	Datastore::builder().with_id(Uuid::new_v4()).build_with_path(path).await.unwrap()
@@ -96,7 +100,7 @@ async fn quota_persistent_restart_recovers_interrupted_rebuild_without_epoch_fli
 	let directory = TempDir::new().unwrap();
 	let path = format!("rocksdb:{}", directory.path().to_string_lossy());
 	let status = std::process::Command::new(std::env::current_exe().unwrap())
-		.args(["--exact", CERTIFICATION_TEST, "--nocapture"])
+		.args(["--exact", CERTIFICATION_TEST.split_once("::").unwrap().1, "--nocapture"])
 		.env(CRASH_CHILD_PATH, &path)
 		.status()
 		.unwrap();

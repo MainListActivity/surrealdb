@@ -26,6 +26,7 @@ members = [
     "surrealdb/kvs-surrealkv",
     "surrealdb/kvs-test",
     "surrealdb/kvs-tikv",
+    "surrealdb/kvs-rocksdb",
     "surrealdb/mcp",
     "surrealdb/ext",
     "surrealdb/mysql",
@@ -116,6 +117,7 @@ surrealdb-kvs-surrealkv = { version = "4.0.1", path = "surrealdb/kvs-surrealkv" 
 # this repository can run it against themselves.
 surrealdb-kvs-test = { version = "4.0.1", path = "surrealdb/kvs-test" }
 surrealdb-kvs-tikv = { version = "4.0.1", path = "surrealdb/kvs-tikv" }
+surrealdb-kvs-rocksdb = { version = "4.0.1", path = "surrealdb/kvs-rocksdb" }
 surrealdb-mysql = { version = "4.0.1", path = "surrealdb/mysql" }
 surrealdb-pgsql = { version = "4.0.1", path = "surrealdb/pgsql" }
 surrealdb-sqlplan = { version = "4.0.1", path = "surrealdb/sqlplan" }
@@ -417,6 +419,7 @@ scripting = ["surrealdb-server/scripting"]
 surrealism = ["surrealdb-server/surrealism"]
 storage-mem = ["surrealdb-server/storage-mem"]
 storage-tikv = ["surrealdb-server/storage-tikv"]
+storage-rocksdb = ["surrealdb-server/storage-rocksdb"]
 storage-surrealkv = ["surrealdb-server/storage-surrealkv"]
 # GraphQL API support
 graphql = ["surrealdb-server/graphql"]

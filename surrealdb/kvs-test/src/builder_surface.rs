@@ -53,7 +53,7 @@ async fn compact_supported(b: &TestBackend) {
 	tx.cancel().await.unwrap();
 }
 
-kvs_test!(compact_supported, only = [surrealkv, surrealkv_versioned]);
+kvs_test!(compact_supported, only = [surrealkv, surrealkv_versioned, rocksdb]);
 
 /// Backends without a compaction primitive report
 /// [`Error::CompactionNotSupported`].
@@ -67,7 +67,7 @@ async fn compact_unsupported(b: &TestBackend) {
 	tx.cancel().await.unwrap();
 }
 
-kvs_test!(compact_unsupported, except = [surrealkv, surrealkv_versioned]);
+kvs_test!(compact_unsupported, except = [surrealkv, surrealkv_versioned, rocksdb]);
 
 /// Keys the range-destroy tests below seed inside [`destroy_test_range`].
 const DESTROY_SEED_KEYS: u8 = 5;
@@ -174,7 +174,7 @@ async fn metrics_collectable(b: &TestBackend) {
 	}
 }
 
-kvs_test!(metrics_collectable, only = [surrealds, surrealos, surrealos_s3]);
+kvs_test!(metrics_collectable, only = [surrealds, surrealos, surrealos_s3, rocksdb]);
 
 /// Backends without metrics return `None` from both metric hooks.
 async fn metrics_none(b: &TestBackend) {
@@ -183,7 +183,7 @@ async fn metrics_none(b: &TestBackend) {
 	assert!(ds.builder().collect_u64_metric("anything").is_none());
 }
 
-kvs_test!(metrics_none, except = [surrealds, surrealos, surrealos_s3]);
+kvs_test!(metrics_none, except = [surrealds, surrealos, surrealos_s3, rocksdb]);
 
 /// Process-local backends report their transactions as local.
 ///
