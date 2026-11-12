@@ -234,25 +234,7 @@ impl Transaction {
 			return Ok(());
 		}
 		self.quota_usage(ns, db).ensure_writable_for_update().await?;
-		let generation_key = Qg {
-			ns,
-			db,
-		};
-		if self.shared_locked_reads() {
-			// A locked read fences concurrent policy changes without writing a
-			// new generation into this transaction's own snapshot.
-			self.getu_key(&generation_key).await?;
-		} else {
-			let generation = self.get_key(&generation_key, None).await?;
-			self.put_compare_key(&generation_key, &generation.unwrap_or(0), generation.as_ref())
-				.await?;
-			if generation.is_none()
-				&& let Some(bound) =
-					self.quota_state.lock().await.current.databases.get_mut(&(ns, db))
-			{
-				bound.observed_generation = Some(0);
-			}
-		}
+		self.fence_lightweight_generation(ns, db, self.shared_locked_reads()).await?;
 		if let Some(policy) = self.get_db_quota(ns, db, None).await? {
 			for table in lightweight {
 				if policy.rules.iter().any(|rule| {
@@ -266,6 +248,34 @@ impl Transaction {
 						),
 					});
 				}
+			}
+		}
+		Ok(())
+	}
+
+	async fn fence_lightweight_generation(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		shared: bool,
+	) -> Result<()> {
+		let generation_key = Qg {
+			ns,
+			db,
+		};
+		if shared {
+			// A locked read fences concurrent policy changes without writing a
+			// new generation into this transaction's own snapshot.
+			self.getu_key(&generation_key).await?;
+		} else {
+			let generation = self.get_key(&generation_key, None).await?;
+			self.put_compare_key(&generation_key, &generation.unwrap_or(0), generation.as_ref())
+				.await?;
+			if generation.is_none()
+				&& let Some(bound) =
+					self.quota_state.lock().await.current.databases.get_mut(&(ns, db))
+			{
+				bound.observed_generation = Some(0);
 			}
 		}
 		Ok(())
@@ -2184,7 +2194,11 @@ mod memory_transaction_tests {
 		shared_metadata_fence_exercise(factory, sequences).await;
 	}
 
-	async fn lightweight_guard_exercise(factory: TransactionFactory, sequences: Sequences) {
+	async fn lightweight_guard_exercise(
+		factory: TransactionFactory,
+		sequences: Sequences,
+		force_exclusive: bool,
+	) {
 		use crate::catalog::{Relation, StoredTableDefinition, TableId};
 		use crate::key::schema::TableKey;
 
@@ -2208,6 +2222,11 @@ mod memory_transaction_tests {
 		)
 		.await
 		.unwrap();
+		if force_exclusive {
+			// Exercise the compare-and-write fallback used by backends without
+			// shared locked reads, including its initially missing generation.
+			tx.fence_lightweight_generation(NS, DB, false).await.unwrap();
+		}
 		tx.guard_lightweight_quota_writes(NS, DB).await.unwrap();
 		tx.commit().await.unwrap();
 	}
@@ -2215,7 +2234,9 @@ mod memory_transaction_tests {
 	#[tokio::test]
 	async fn lightweight_guard_keeps_transaction_generation_consistent() {
 		let (factory, sequences) = empty_factory().await;
-		lightweight_guard_exercise(factory, sequences).await;
+		lightweight_guard_exercise(factory, sequences, false).await;
+		let (factory, sequences) = empty_factory().await;
+		lightweight_guard_exercise(factory, sequences, true).await;
 	}
 
 	#[cfg(feature = "kv-surrealkv")]
@@ -2233,7 +2254,7 @@ mod memory_transaction_tests {
 			Arc::new(Default::default()),
 		);
 		let sequences = Sequences::new(factory.clone(), uuid::Uuid::new_v4());
-		lightweight_guard_exercise(factory, sequences).await;
+		lightweight_guard_exercise(factory, sequences, false).await;
 	}
 
 	#[tokio::test]
