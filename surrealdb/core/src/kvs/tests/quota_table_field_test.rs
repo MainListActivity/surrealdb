@@ -88,6 +88,20 @@ async fn field_count(ds: &Datastore, table: &str) -> u64 {
 	count
 }
 
+#[tokio::test]
+async fn changing_table_kind_updates_endpoint_field_usage() {
+	let ds = setup().await;
+	let owner = Session::owner().with_ns("tenant").with_db("app");
+	for (sql, expected) in [
+		("DEFINE TABLE edge TYPE RELATION", 0),
+		("ALTER TABLE edge TYPE ANY", 2),
+		("ALTER TABLE edge TYPE RELATION", 0),
+	] {
+		ds.execute(sql, &owner, None).await.unwrap().remove(0).result.unwrap();
+		assert_eq!(field_count(&ds, "edge").await, expected, "{sql}");
+	}
+}
+
 async fn record_count(ds: &Datastore, table: &str) -> u64 {
 	let tx = ds.transaction(TransactionType::Read).await.unwrap();
 	let db = tx.get_db_by_name("tenant", "app", None).await.unwrap().unwrap();

@@ -282,6 +282,21 @@ impl Transaction {
 					return Ok(());
 				}
 			}
+			// Changing a table's kind can change whether its existing in/out
+			// fields are billable, even when the field keys themselves do not
+			// change. Capture their old eligibility before the table write.
+			if is_table && !deleting {
+				for name in ["in", "out"] {
+					let field_key = crate::key::schema::FieldKey {
+						ns,
+						db,
+						tb: Cow::Borrowed(table),
+						fd: Cow::Borrowed(name),
+					}
+					.encode_key()?;
+					self.track_quota_catalog_key(&field_key, ns, db, table, false, false).await?;
+				}
+			}
 			self.quota_usage(ns, db).bind_database().await?;
 			let existed = self.billable_catalog_key_exists(key, is_table).await?;
 			self.quota_state
@@ -2090,6 +2105,53 @@ mod memory_transaction_tests {
 			QuotaUsageState::Uninitialized
 		);
 		tx.cancel().await.unwrap();
+	}
+
+	#[tokio::test]
+	async fn table_kind_changes_recount_existing_endpoint_fields() {
+		use crate::catalog::{FieldDefinition, Relation, StoredTableDefinition, TableId};
+		use crate::key::schema::{FieldKey, TableKey};
+		use surrealdb_expr::expr::Idiom;
+
+		let (factory, sequences) = setup(10).await;
+		let table_key = TableKey {
+			ns: NS,
+			db: DB,
+			tb: Cow::Owned(table()),
+		};
+		let mut definition = StoredTableDefinition::new(NS, DB, TableId(1), table());
+		definition.table_type = TableType::Relation(Relation {
+			from: Vec::new(),
+			to: Vec::new(),
+			enforced: false,
+			lightweight: false,
+		});
+		let tx = factory.transaction(TransactionType::Write, sequences.clone()).await.unwrap();
+		tx.set_key(&table_key, &definition).await.unwrap();
+		for name in ["in", "out"] {
+			let key = FieldKey {
+				ns: NS,
+				db: DB,
+				tb: Cow::Owned(table()),
+				fd: Cow::Borrowed(name),
+			};
+			let field = FieldDefinition {
+				name: Idiom::field(name),
+				table: table(),
+				..Default::default()
+			};
+			tx.set_key(&key, &field.to_stored()).await.unwrap();
+		}
+		tx.commit().await.unwrap();
+		for (kind, expected) in [(TableType::Any, 2), (definition.table_type.clone(), 0)] {
+			let tx = factory.transaction(TransactionType::Write, sequences.clone()).await.unwrap();
+			definition.table_type = kind;
+			tx.set_key(&table_key, &definition).await.unwrap();
+			tx.commit().await.unwrap();
+			let tx = factory.transaction(TransactionType::Read, sequences.clone()).await.unwrap();
+			assert_eq!(tx.quota_usage(NS, DB).field_count(&table()).await.unwrap(), expected);
+			tx.cancel().await.unwrap();
+		}
 	}
 
 	#[tokio::test]
