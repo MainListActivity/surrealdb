@@ -2790,7 +2790,7 @@ impl Transaction {
 		match u16::from(expected_version) {
 			0x8003 => {
 				supported.upstream_storage_major = 3;
-				supported.minimum_compatible_fork_release = "3.3.0-native-quota.1".to_owned();
+				"3.3.0-native-quota.1".clone_into(&mut supported.minimum_compatible_fork_release);
 			}
 			crate::version::MajorVersion::UPSTREAM_LATEST => {}
 			_ => return Err(invalid().into()),
@@ -7238,15 +7238,13 @@ impl Transaction {
 			Some(Defined::Table(change)) => {
 				if matches!(change.change, TableDefinitionChange::Removed)
 					&& !self.quota_catalog_migration.load(Ordering::Relaxed)
-				{
-					if let Err(error) = self
+					&& let Err(error) = self
 						.quota_usage(change.table.0, change.table.1)
 						.reset_table_usage(&change.table.2)
 						.await
-					{
-						self.catalog_write_poisoned.store(true, Ordering::Relaxed);
-						return Err(error);
-					}
+				{
+					self.catalog_write_poisoned.store(true, Ordering::Relaxed);
+					return Err(error);
 				}
 				if change.stamped {
 					self.reprint_stamped_table(change.table.clone()).await?;
