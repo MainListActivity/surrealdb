@@ -171,13 +171,25 @@ impl Transaction {
 			if key.len() < 12 || !key.starts_with(b"/*") || key[6] != b'*' || key[11] != b'*' {
 				return Ok(());
 			}
+			let record = crate::key::schema::RecordKey::decode_key(key);
+			// Only record and graph adjacency mutations can affect record quota
+			// accounting. Fencing unrelated keys makes an index build contend
+			// with its own definition transaction in a database with lightweight
+			// relations.
+			if record.is_err()
+				&& crate::key::schema::DecodedGraph::decode(key).is_err()
+				&& crate::key::schema::AdjacencyKey::decode_key(key).is_err()
+				&& crate::key::schema::EdgeCacheKey::decode_key(key).is_err()
+			{
+				return Ok(());
+			}
 			let ns = NamespaceId(u32::from_be_bytes(
 				key[2..6].try_into().expect("four namespace bytes"),
 			));
 			let db =
 				DatabaseId(u32::from_be_bytes(key[7..11].try_into().expect("four database bytes")));
 			self.guard_lightweight_quota_writes(ns, db).await?;
-			let Ok(record) = crate::key::schema::RecordKey::decode_key(key) else {
+			let Ok(record) = record else {
 				return Ok(());
 			};
 			let table = record.tb.into_owned();

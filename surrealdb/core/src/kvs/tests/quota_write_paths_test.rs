@@ -209,6 +209,38 @@ async fn provider_raw_held_and_batch_writes_share_one_quota_admission() {
 	}
 }
 
+#[tokio::test]
+async fn index_build_succeeds_with_lightweight_relation_in_database() {
+	let ds = Datastore::builder().build_with_path("memory").await.unwrap();
+	let owner = Session::owner().with_ns("tenant").with_db("app");
+	run(&ds, &Session::owner(), "DEFINE NAMESPACE tenant; USE NS tenant; DEFINE DATABASE app")
+		.await;
+	run(
+		&ds,
+		&owner,
+		"DEFINE TABLE person SCHEMALESS; \
+		 DEFINE TABLE follows TYPE RELATION IN person OUT person LIGHTWEIGHT; \
+		 DEFINE TABLE item SCHEMAFULL; \
+		 DEFINE FIELD value ON item TYPE int VALUE $value + 1; \
+		 DEFINE INDEX item_value ON item FIELDS value UNIQUE",
+	)
+	.await;
+	run(
+		&ds,
+		&Session::owner().with_ns("tenant"),
+		"DEFINE QUOTA ON DATABASE app RULE edges FOR RECORD MATCH EXACT follows LIMIT 10",
+	)
+	.await;
+	run(
+		&ds,
+		&owner,
+		"DEFINE TABLE item2 SCHEMAFULL; \
+		 DEFINE FIELD value ON item2 TYPE int; \
+		 DEFINE INDEX item2_value ON item2 FIELDS value",
+	)
+	.await;
+}
+
 /// Lightweight edges have no RecordKey. Until logical-edge accounting exists,
 /// a matching policy must reject the whole graph write instead of certifying
 /// zero usage, and rebuild preflight must not strand a healthy ledger.
@@ -246,6 +278,51 @@ async fn lightweight_relations_fail_closed_without_partial_edges_or_rebuild_fenc
 		assert_eq!(tx.quota_usage(ns, db).record_count(&"person".into()).await.unwrap(), 2);
 		assert_eq!(tx.quota_usage(ns, db).record_count(&"follows".into()).await.unwrap(), 0);
 		tx.cancel().await.unwrap();
+
+		// Raw graph writes must remain fenced even when unrelated index keys
+		// no longer take the lightweight-relation quota guard.
+		let person = RecordId::new("person".into(), "one".to_owned());
+		let other = RecordId::new("person".into(), "two".to_owned());
+		let edge = RecordId::new("follows".into(), "edge".to_owned());
+		let graph = crate::key::schema::GraphKey {
+			ns,
+			db,
+			tb: Cow::Borrowed(&person.table),
+			id: Cow::Borrowed(&person.key),
+			dir: surrealdb_expr::expr::Dir::Out,
+			foreign_table: Cow::Borrowed(&edge.table),
+			foreign_key: Cow::Borrowed(&edge.key),
+		};
+		let pointer = crate::key::schema::GraphPointerKey {
+			ns,
+			db,
+			tb: Cow::Borrowed(&person.table),
+			id: Cow::Borrowed(&person.key),
+			dir: surrealdb_expr::expr::Dir::Out,
+			foreign_table: Cow::Borrowed(&edge.table),
+			foreign_key: Cow::Borrowed(&edge.key),
+			target_table: Cow::Borrowed(&other.table),
+			target_key: Cow::Borrowed(&other.key),
+		};
+		let adjacency = crate::key::schema::AdjacencyKey {
+			ns,
+			db,
+			tb: Cow::Borrowed(&person.table),
+			id: Cow::Borrowed(&person.key),
+			dir: surrealdb_expr::expr::Dir::Out,
+			edge_table: Cow::Borrowed(&edge.table),
+			chunk_start: Cow::Borrowed(&edge.key),
+		};
+		for key in [
+			graph.encode_key().unwrap(),
+			pointer.encode_key().unwrap(),
+			adjacency.encode_key().unwrap(),
+		] {
+			let tx = ds.transaction(TransactionType::Write).await.unwrap();
+			let error = tx.set(key, Vec::<u8>::new()).await.unwrap_err();
+			assert!(error.to_string().contains("lightweight"), "{selector}: {error}");
+			tx.cancel().await.unwrap();
+		}
 
 		let graph_query = "SELECT * FROM follows; \
             SELECT VALUE ->follows FROM person:one; \
