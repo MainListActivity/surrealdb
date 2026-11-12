@@ -1991,8 +1991,10 @@ mod written_by_3x_test {
 			let before = snapshot(dir);
 			let path = dir.to_string_lossy().into_owned();
 			for opt_in in [false, true] {
-				let mut config = SurrealKvConfig::default();
-				config.experimental_upgrade_from_3x = opt_in;
+				let config = SurrealKvConfig {
+					experimental_upgrade_from_3x: opt_in,
+					..SurrealKvConfig::default()
+				};
 				let Err(err) = Datastore::new(&path, config).await else {
 					panic!("a {engine} directory written by 3.x was opened (opt_in={opt_in})");
 				};
