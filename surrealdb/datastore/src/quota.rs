@@ -238,9 +238,21 @@ impl Transaction {
 			ns,
 			db,
 		};
-		let generation = self.get_key(&generation_key, None).await?;
-		self.put_compare_key(&generation_key, &generation.unwrap_or(0), generation.as_ref())
-			.await?;
+		if self.shared_locked_reads() {
+			// A locked read fences concurrent policy changes without writing a
+			// new generation into this transaction's own snapshot.
+			self.getu_key(&generation_key).await?;
+		} else {
+			let generation = self.get_key(&generation_key, None).await?;
+			self.put_compare_key(&generation_key, &generation.unwrap_or(0), generation.as_ref())
+				.await?;
+			if generation.is_none()
+				&& let Some(bound) =
+					self.quota_state.lock().await.current.databases.get_mut(&(ns, db))
+			{
+				bound.observed_generation = Some(0);
+			}
+		}
 		if let Some(policy) = self.get_db_quota(ns, db, None).await? {
 			for table in lightweight {
 				if policy.rules.iter().any(|rule| {
@@ -2170,6 +2182,36 @@ mod memory_transaction_tests {
 		tx.quota_usage(NS, DB).initialize_new_database().await.unwrap();
 		tx.commit().await.unwrap();
 		shared_metadata_fence_exercise(factory, sequences).await;
+	}
+
+	#[tokio::test]
+	async fn lightweight_guard_keeps_transaction_generation_consistent() {
+		use crate::catalog::{Relation, StoredTableDefinition, TableId};
+		use crate::key::schema::TableKey;
+
+		let (factory, sequences) = empty_factory().await;
+		let tx = factory.transaction(TransactionType::Write, sequences.clone()).await.unwrap();
+		tx.quota_usage(NS, DB).initialize_new_database().await.unwrap();
+		tx.set(key(1), b"record".to_vec()).await.unwrap();
+		let mut definition = StoredTableDefinition::new(NS, DB, TableId(1), table());
+		definition.table_type = TableType::Relation(Relation {
+			from: Vec::new(),
+			to: Vec::new(),
+			enforced: false,
+			lightweight: true,
+		});
+		tx.set_key(
+			&TableKey {
+				ns: NS,
+				db: DB,
+				tb: Cow::Owned(table()),
+			},
+			&definition,
+		)
+		.await
+		.unwrap();
+		tx.guard_lightweight_quota_writes(NS, DB).await.unwrap();
+		tx.commit().await.unwrap();
 	}
 
 	#[tokio::test]
