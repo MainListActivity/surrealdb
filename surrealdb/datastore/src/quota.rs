@@ -2109,9 +2109,10 @@ mod memory_transaction_tests {
 
 	#[tokio::test]
 	async fn table_kind_changes_recount_existing_endpoint_fields() {
+		use surrealdb_expr::expr::Idiom;
+
 		use crate::catalog::{FieldDefinition, Relation, StoredTableDefinition, TableId};
 		use crate::key::schema::{FieldKey, TableKey};
-		use surrealdb_expr::expr::Idiom;
 
 		let (factory, sequences) = setup(10).await;
 		let table_key = TableKey {
