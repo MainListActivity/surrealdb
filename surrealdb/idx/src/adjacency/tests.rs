@@ -15,7 +15,8 @@ use super::fold::{fold_scope, fold_scope_bounded, fold_scope_from};
 use super::merge::{AdjacencyScope, MergedAdjacencyCursor, MergedAdjacencyEdge, scope_degree};
 use crate::catalog::providers::{BoxProviderFut, CancellationProbe, TableProvider};
 use crate::catalog::{
-	DatabaseId, FromStored, NamespaceId, StoredTableDefinition, TableDefinition, TableId,
+	DatabaseId, FromStored, NamespaceId, QuotaUsageState, StoredTableDefinition, TableDefinition,
+	TableId,
 };
 use crate::expr::Dir;
 use crate::key::schema::{
@@ -62,7 +63,9 @@ fn pointer_key<'a>(
 /// Defines the vertex table and writes one live pointer key per edge.
 async fn seed(store: &TestIndexStore, edges: &[(RecordId, RecordId)]) {
 	let txn = store.transaction(Write).await.unwrap();
-	txn.quota_usage(NS, DB).initialize_new_database().await.unwrap();
+	if txn.quota_usage(NS, DB).meta().await.unwrap().state == QuotaUsageState::Uninitialized {
+		txn.quota_usage(NS, DB).initialize_new_database().await.unwrap();
+	}
 	let vertex = vertex();
 	let table = TableDefinition::from_stored(&StoredTableDefinition::new(
 		NS,
@@ -663,6 +666,7 @@ async fn numeric_chunks_count_through_the_merge() {
 	// The edge table must be defined for its ids to be compressible.
 	{
 		let txn = store.transaction(Write).await.unwrap();
+		txn.quota_usage(NS, DB).initialize_new_database().await.unwrap();
 		let table = TableDefinition::from_stored(&StoredTableDefinition::new(
 			NS,
 			DB,
@@ -705,6 +709,7 @@ async fn numeric_folds_resolve_and_collect_deleted_ids() {
 	// The edge table must be defined for its ids to be compressible.
 	{
 		let txn = store.transaction(Write).await.unwrap();
+		txn.quota_usage(NS, DB).initialize_new_database().await.unwrap();
 		let table = TableDefinition::from_stored(&StoredTableDefinition::new(
 			NS,
 			DB,
@@ -820,6 +825,7 @@ async fn numeric_chunks_fill_to_the_entry_cap() {
 	let store = TestIndexStore::with_idx_config(|config| config.graph_numeric_ids = true).await;
 	{
 		let txn = store.transaction(Write).await.unwrap();
+		txn.quota_usage(NS, DB).initialize_new_database().await.unwrap();
 		let table = TableDefinition::from_stored(&StoredTableDefinition::new(
 			NS,
 			DB,
@@ -873,6 +879,7 @@ async fn refolding_a_numeric_scope_assigns_no_new_ids() {
 	let store = TestIndexStore::with_idx_config(|config| config.graph_numeric_ids = true).await;
 	{
 		let txn = store.transaction(Write).await.unwrap();
+		txn.quota_usage(NS, DB).initialize_new_database().await.unwrap();
 		let table = TableDefinition::from_stored(&StoredTableDefinition::new(
 			NS,
 			DB,
@@ -1013,6 +1020,7 @@ async fn next_batch_keys_matches_the_edge_stream() {
 	{
 		// The edge table must be defined for its ids to be compressible.
 		let txn = numeric.transaction(Write).await.unwrap();
+		txn.quota_usage(NS, DB).initialize_new_database().await.unwrap();
 		let table = TableDefinition::from_stored(&StoredTableDefinition::new(
 			NS,
 			DB,
@@ -1306,6 +1314,7 @@ async fn undefined_target_table_marks_no_table_numeric() {
 		let store = TestIndexStore::with_idx_config(|config| config.graph_numeric_ids = true).await;
 		let vertex = vertex();
 		let txn = store.transaction(Write).await.unwrap();
+		txn.quota_usage(NS, DB).initialize_new_database().await.unwrap();
 		for (id, name) in [(1, "person"), (2, "likes"), (3, "friend")] {
 			let table = TableDefinition::from_stored(&StoredTableDefinition::new(
 				NS,
