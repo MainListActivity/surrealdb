@@ -1067,6 +1067,23 @@ impl QuotaTransaction<'_> {
 	/// Reassert observed metadata so this transaction conflicts with a
 	/// concurrent maintenance-state transition at commit time.
 	async fn reassert_meta(&self, meta: &QuotaUsageMeta) -> Result<()> {
+		// A shared conflict-tracked read prevents a concurrent rebuild from
+		// committing unnoticed without making unrelated writers conflict with
+		// each other. Backends with exclusive locked reads retain the existing
+		// compare-and-write fence.
+		if self.tx.shared_locked_reads() {
+			let observed = self
+				.tx
+				.getu_key(&Qm {
+					ns: self.ns,
+					db: self.db,
+				})
+				.await?;
+			if observed.as_ref() != Some(meta) {
+				bail!(Error::QuotaConflict);
+			}
+			return Ok(());
+		}
 		self.tx
 			.put_compare_key(
 				&Qm {
@@ -2105,6 +2122,54 @@ mod memory_transaction_tests {
 			QuotaUsageState::Uninitialized
 		);
 		tx.cancel().await.unwrap();
+	}
+
+	async fn shared_metadata_fence_exercise(factory: TransactionFactory, sequences: Sequences) {
+		let seed = factory.transaction(TransactionType::Write, sequences.clone()).await.unwrap();
+		seed.set(key(1), b"old".to_vec()).await.unwrap();
+		seed.commit().await.unwrap();
+
+		let first = factory.transaction(TransactionType::Write, sequences.clone()).await.unwrap();
+		assert_eq!(first.get(key(1), None).await.unwrap(), Some(b"old".to_vec()));
+		let second = factory.transaction(TransactionType::Write, sequences.clone()).await.unwrap();
+		second.set(key(1), b"new".to_vec()).await.unwrap();
+		second.commit().await.unwrap();
+		first.set(key(2), b"other".to_vec()).await.unwrap();
+		first.commit().await.unwrap();
+
+		let writer = factory.transaction(TransactionType::Write, sequences.clone()).await.unwrap();
+		writer.set(key(3), b"pending".to_vec()).await.unwrap();
+		let rebuild = factory.transaction(TransactionType::Write, sequences.clone()).await.unwrap();
+		rebuild.quota_usage(NS, DB).begin_rebuild().await.unwrap();
+		rebuild.commit().await.unwrap();
+		assert!(writer.commit().await.is_err(), "a rebuild must fence concurrent writes");
+	}
+
+	#[tokio::test]
+	async fn shared_metadata_fence_allows_unrelated_writes_but_rejects_rebuild_races() {
+		let (factory, sequences) = setup(10).await;
+		shared_metadata_fence_exercise(factory, sequences).await;
+	}
+
+	#[cfg(feature = "kv-surrealkv")]
+	#[tokio::test]
+	async fn surrealkv_shared_metadata_fence_preserves_concurrency_and_rebuild_safety() {
+		let dir = temp_dir::TempDir::new().unwrap();
+		let path = format!("surrealkv:{}", dir.path().display());
+		let builder = surrealdb_kvs_any::Backends::community()
+			.new_transaction_builder(&path, Default::default(), ConfigMap::default())
+			.await
+			.unwrap();
+		let factory = TransactionFactory::new(
+			Arc::new(crate::triggers::CommitTriggers::new()),
+			builder,
+			Arc::new(Default::default()),
+		);
+		let sequences = Sequences::new(factory.clone(), uuid::Uuid::new_v4());
+		let tx = factory.transaction(TransactionType::Write, sequences.clone()).await.unwrap();
+		tx.quota_usage(NS, DB).initialize_new_database().await.unwrap();
+		tx.commit().await.unwrap();
+		shared_metadata_fence_exercise(factory, sequences).await;
 	}
 
 	#[tokio::test]
