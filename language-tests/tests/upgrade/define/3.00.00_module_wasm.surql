@@ -7,6 +7,7 @@ allow-experimental = ["surrealism"]
 
 [test]
 upgrade = true
+upgrade-only = true
 # The fixture is built by the current toolchain and loaded by the source binary,
 # so the source has to accept the ABI the current toolchain stamps. That ABI is
 # 4, which no released binary accepts — the check is an equality, so a 3.2.x

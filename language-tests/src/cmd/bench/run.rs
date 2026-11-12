@@ -423,6 +423,8 @@ pub async fn run(color: ColorMode, parent: &ArgMatches, current: &ArgMatches) ->
 	let set_builder = RunSetBuilder::new(&set, &mut load_errors)
 		// Only run test for which run is enabled.
 		.with_filter(|x| x.test.config.parsed.bench.run)
+		// A current-version benchmark cannot create an older binary's fixture.
+		.with_filter(|x| !x.test.config.parsed.test.upgrade_only)
 		// Only run benches whose path matches the optional filter.
 		.with_filter(|x| {
 			cfg.filter.is_none_or(|filter| x.test.origin.path.contains(filter.as_str()))

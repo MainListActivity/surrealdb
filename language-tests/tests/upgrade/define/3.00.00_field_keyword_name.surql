@@ -24,10 +24,10 @@ overwritten in place rather than defined a second time beside the one the old bi
 removed by REMOVE FIELD on its path, and removed with the field it belongs to."""
 
 [[test.results]]
-value = "{ events: {  }, fields: { function: 'DEFINE FIELD `function` ON kwfn TYPE string PERMISSIONS FULL' }, indexes: {  }, lives: {  }, tables: {  } }"
+value = "{ function: 'DEFINE FIELD `function` ON kwfn TYPE string PERMISSIONS FULL' }"
 
 [[test.results]]
-value = "{ events: {  }, fields: { select: 'DEFINE FIELD `select` ON kwsel TYPE string PERMISSIONS FULL' }, indexes: {  }, lives: {  }, tables: {  } }"
+value = "{ select: 'DEFINE FIELD `select` ON kwsel TYPE string PERMISSIONS FULL' }"
 
 [[test.results]]
 value = "[{ function: 'f', id: kwfn:1 }]"
@@ -69,8 +69,8 @@ value = "NONE"
 value = "[]"
 
 */
-INFO FOR TABLE kwfn;
-INFO FOR TABLE kwsel;
+(INFO FOR TABLE kwfn).fields;
+(INFO FOR TABLE kwsel).fields;
 CREATE kwfn:1 SET `function` = 'f';
 SELECT * FROM kwfn;
 -- The element definition the old binary wrote is read back: one definition of

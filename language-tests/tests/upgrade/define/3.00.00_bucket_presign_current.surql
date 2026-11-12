@@ -4,6 +4,7 @@ imports = ["upgrade/define/3.00.00_bucket_import.surql"]
 
 [test]
 upgrade = true
+upgrade-only = true
 reason = """
 A bucket a release wrote before `StoredBucketDefinition` revision 2 has no
 `presign_nonce` and reads back as nil. That nil must be a usable identity: the

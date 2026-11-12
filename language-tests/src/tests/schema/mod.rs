@@ -438,6 +438,11 @@ pub struct TestDetails {
 	#[serde(default)]
 	pub upgrade: bool,
 
+	/// Requires a fixture written by an older binary and is meaningful only
+	/// on an upgrade run, not when the current engine creates its own input.
+	#[serde(default)]
+	pub upgrade_only: bool,
+
 	/// Marks an upgrade test written for the RocksDB-to-SurrealKV migration
 	/// axis (`upgrade --backend rocksdb-migration`), where the source binary
 	/// writes a `rocksdb://` store and the target opens it as `surrealkv://`.
@@ -508,6 +513,7 @@ impl Default for TestDetails {
 			wip: false,
 			requires: Default::default(),
 			upgrade: Default::default(),
+			upgrade_only: Default::default(),
 			migration: Default::default(),
 			modes: Default::default(),
 			legacy_syntax: Default::default(),
@@ -1227,6 +1233,14 @@ mod modes_tests {
 
 	fn details(toml: &str) -> TestDetails {
 		toml::from_str::<TestConfig>(toml).expect("parses").test
+	}
+
+	#[test]
+	fn upgrade_only_is_an_explicit_declared_setting() {
+		let d = details("[test]\nupgrade = true\nupgrade-only = true");
+		assert!(d.upgrade && d.upgrade_only);
+		assert!(d.unused_keys().is_empty());
+		assert!(!details("[test]").upgrade_only);
 	}
 
 	#[test]

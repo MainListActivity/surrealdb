@@ -159,6 +159,9 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 	let set_builder = RunSetBuilder::new(&set, &mut load_errors)
 		// Only run test for which run is enabled.
 		.with_filter(|x| x.test.config.parsed.test.run)
+		// Some upgrade cases require a fixture produced by an older binary;
+		// running their import against this engine cannot exercise that state.
+		.with_filter(|x| !x.test.config.parsed.test.upgrade_only)
 		// A `[test.chain]` test has no meaning here. Its fixture is created by
 		// the chain runner's `setup` on whichever version first supports the
 		// feature, and its body asserts against `$hop`, which only a walk binds
