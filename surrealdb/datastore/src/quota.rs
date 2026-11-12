@@ -2239,6 +2239,50 @@ mod memory_transaction_tests {
 		lightweight_guard_exercise(factory, sequences, true).await;
 	}
 
+	#[tokio::test]
+	async fn lightweight_write_conflicts_with_concurrent_policy_generation_change() {
+		use crate::catalog::{Relation, StoredTableDefinition, TableId};
+		use crate::key::schema::TableKey;
+
+		let (factory, sequences) = empty_factory().await;
+		let tx = factory.transaction(TransactionType::Write, sequences.clone()).await.unwrap();
+		tx.quota_usage(NS, DB).initialize_new_database().await.unwrap();
+		let mut definition = StoredTableDefinition::new(NS, DB, TableId(1), table());
+		definition.table_type = TableType::Relation(Relation {
+			from: Vec::new(),
+			to: Vec::new(),
+			enforced: false,
+			lightweight: true,
+		});
+		tx.set_key(
+			&TableKey {
+				ns: NS,
+				db: DB,
+				tb: Cow::Owned(table()),
+			},
+			&definition,
+		)
+		.await
+		.unwrap();
+		tx.commit().await.unwrap();
+
+		let writer = factory.transaction(TransactionType::Write, sequences.clone()).await.unwrap();
+		writer.set(key(1), b"pending".to_vec()).await.unwrap();
+		let policy = factory.transaction(TransactionType::Write, sequences.clone()).await.unwrap();
+		policy
+			.set_key(
+				&Qg {
+					ns: NS,
+					db: DB,
+				},
+				&1,
+			)
+			.await
+			.unwrap();
+		policy.commit().await.unwrap();
+		assert!(writer.commit().await.is_err(), "a policy change must fence a lightweight write");
+	}
+
 	#[cfg(feature = "kv-surrealkv")]
 	#[tokio::test]
 	async fn surrealkv_lightweight_guard_keeps_transaction_generation_consistent() {
