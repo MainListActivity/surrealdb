@@ -396,17 +396,16 @@ mod endpoint_tests {
 	/// `surrealkv` and open the same path with it.
 	#[test]
 	fn deprecated_schemes_open_with_surrealkv() {
-		for url in ["indxdb://name"] {
-			let endpoint = __into_endpoint(url).unwrap();
-			assert!(
-				matches!(
-					crate::opt::endpoint::EndpointKind::from(endpoint.url.scheme()),
-					crate::opt::endpoint::EndpointKind::SurrealKv
-				),
-				"{url} is not opened with surrealkv"
-			);
-			assert_eq!(endpoint.path, url);
-		}
+		let url = "indxdb://name";
+		let endpoint = __into_endpoint(url).unwrap();
+		assert!(
+			matches!(
+				crate::opt::endpoint::EndpointKind::from(endpoint.url.scheme()),
+				crate::opt::endpoint::EndpointKind::SurrealKv
+			),
+			"{url} is not opened with surrealkv"
+		);
+		assert_eq!(endpoint.path, url);
 	}
 
 	#[test]
