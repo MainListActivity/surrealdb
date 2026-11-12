@@ -53,6 +53,7 @@ pub struct QuotaTransactionState {
 	current: QuotaTransactionSnapshot,
 	savepoints: Vec<QuotaTransactionSnapshot>,
 	flushed_admission: bool,
+	flushed_policy_admission: bool,
 }
 
 impl QuotaTransactionState {
@@ -306,20 +307,24 @@ impl Transaction {
 	/// Resolve all transaction-local quota intents and stage one conditional
 	/// counter update per affected bucket.
 	pub async fn flush_quota_usage(&self) -> Result<()> {
-		self.flush_quota_usage_inner().await.map_err(|error| {
-			if crate::is_retryable_transaction_conflict(&error)
-				|| matches!(
-					crate::storage_error(&error),
-					Some(
-						surrealdb_kvs::Error::TransactionConditionNotMet
-							| surrealdb_kvs::Error::TransactionKeyAlreadyExists
-					)
-				) {
-				Error::QuotaConflict.into()
-			} else {
-				error
+		if let Err(error) = self.flush_quota_usage_inner().await {
+			let state = self.quota_state.lock().await;
+			let policy_admission = state.flushed_policy_admission
+				|| state.current.databases.values().any(|bound| bound.policy.is_some());
+			if policy_admission
+				&& (crate::is_retryable_transaction_conflict(&error)
+					|| matches!(
+						crate::storage_error(&error),
+						Some(
+							surrealdb_kvs::Error::TransactionConditionNotMet
+								| surrealdb_kvs::Error::TransactionKeyAlreadyExists
+						)
+					)) {
+				return Err(Error::QuotaConflict.into());
 			}
-		})
+			return Err(error);
+		}
+		Ok(())
 	}
 
 	// Relation endpoint definitions may be written before their table definition.
@@ -621,14 +626,16 @@ impl Transaction {
 				truncated: violations_truncated,
 			})));
 		}
+		quota_state.flushed_policy_admission |=
+			snapshot.databases.values().any(|bound| bound.policy.is_some());
 		quota_state.current = QuotaTransactionSnapshot::default();
 		quota_state.flushed_admission = true;
 		Ok(())
 	}
 
-	/// Whether this transaction staged quota admission fences or counters.
-	pub async fn has_flushed_quota_admission(&self) -> bool {
-		self.quota_state.lock().await.flushed_admission
+	/// Whether admission ran with an active quota policy.
+	pub async fn has_flushed_quota_policy_admission(&self) -> bool {
+		self.quota_state.lock().await.flushed_policy_admission
 	}
 
 	/// Check before installing a rebuild maintenance fence. The scan repeats

@@ -3568,7 +3568,7 @@ impl Transaction {
 			}
 			// The cleanup error is secondary here. Callers need the commit
 			// error so retryable transaction conflicts keep their retry path.
-			if self.has_flushed_quota_admission().await
+			if self.has_flushed_quota_policy_admission().await
 				&& (e.is_retryable()
 					|| matches!(
 						e,

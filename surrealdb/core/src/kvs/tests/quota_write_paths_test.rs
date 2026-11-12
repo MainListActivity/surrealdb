@@ -241,6 +241,46 @@ async fn index_build_succeeds_with_lightweight_relation_in_database() {
 	.await;
 }
 
+#[tokio::test]
+async fn commit_conflict_retains_kind_without_a_quota_policy() {
+	for policy in [false, true] {
+		let ds = Datastore::builder().build_with_path("memory").await.unwrap();
+		let owner = Session::owner().with_ns("tenant").with_db("app");
+		run(&ds, &Session::owner(), "DEFINE NAMESPACE tenant; USE NS tenant; DEFINE DATABASE app")
+			.await;
+		run(&ds, &owner, "DEFINE TABLE item").await;
+		if policy {
+			run(
+				&ds,
+				&Session::owner().with_ns("tenant"),
+				"DEFINE QUOTA ON DATABASE app RULE records FOR RECORD MATCH EXACT item LIMIT 10",
+			)
+			.await;
+		}
+		let first = Arc::new(ds.transaction(TransactionType::Write).await.unwrap());
+		let second = Arc::new(ds.transaction(TransactionType::Write).await.unwrap());
+		for tx in [&first, &second] {
+			for response in ds
+				.run(
+					crate::kvs::QueryRequest::new("CREATE item:one SET value = 1", &owner)
+						.with_transaction(Arc::clone(tx)),
+				)
+				.await
+				.unwrap()
+			{
+				response.result.unwrap();
+			}
+		}
+		first.commit().await.unwrap();
+		let error = second.commit().await.expect_err("the stale transaction must not commit");
+		if policy {
+			assert!(error.to_string().contains("Quota admission conflicted"), "{error}");
+		} else {
+			assert!(surrealdb_datastore::is_retryable_transaction_conflict(&error), "{error}");
+		}
+	}
+}
+
 /// Lightweight edges have no RecordKey. Until logical-edge accounting exists,
 /// a matching policy must reject the whole graph write instead of certifying
 /// zero usage, and rebuild preflight must not strand a healthy ledger.
