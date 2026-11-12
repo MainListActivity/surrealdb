@@ -139,8 +139,6 @@ pub(crate) enum Kvs {
 	Rocksdb,
 	#[cfg_attr(not(feature = "kv-tikv"), expect(dead_code))]
 	Tikv,
-	#[cfg_attr(not(feature = "kv-surrealkv"), expect(dead_code))]
-	SurrealKV,
 }
 
 trait CreateDs {
@@ -208,33 +206,6 @@ mod rocksdb {
 
 	include_tests!(new_ds =>
 		quota_backend_contract,
-	);
-}
-
-#[cfg(feature = "kv-surrealkv")]
-mod surrealkv {
-	use temp_dir::TempDir;
-	use uuid::Uuid;
-
-	use super::Kvs;
-	use crate::kvs::Datastore;
-
-	async fn new_ds(id: Uuid) -> (std::sync::Arc<Datastore>, Kvs) {
-		// Setup the temporary data storage path
-		let path = TempDir::new().unwrap().path().to_string_lossy().to_string();
-		let path = format!("surrealkv:{path}");
-		// Setup the SurrealKV datastore
-		let ds = Datastore::builder()
-			.without_maintenance_tasks()
-			.with_id(id)
-			.build_with_path(&path)
-			.await
-			.unwrap();
-		// Return the datastore
-		(ds, Kvs::SurrealKV)
-	}
-
-	include_tests!(new_ds =>
 	);
 }
 
