@@ -62,6 +62,7 @@ fn pointer_key<'a>(
 /// Defines the vertex table and writes one live pointer key per edge.
 async fn seed(store: &TestIndexStore, edges: &[(RecordId, RecordId)]) {
 	let txn = store.transaction(Write).await.unwrap();
+	txn.quota_usage(NS, DB).initialize_new_database().await.unwrap();
 	let vertex = vertex();
 	let table = TableDefinition::from_stored(&StoredTableDefinition::new(
 		NS,

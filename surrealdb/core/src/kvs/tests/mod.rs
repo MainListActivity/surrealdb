@@ -105,11 +105,15 @@ mod warm_write_reads_test;
 #[cfg(feature = "kv-mem")]
 mod write_guard_test;
 
+#[cfg(any(feature = "kv-mem", feature = "kv-rocksdb", feature = "kv-tikv"))]
 use std::future::Future;
 
+#[cfg(any(feature = "kv-mem", feature = "kv-rocksdb", feature = "kv-tikv"))]
 use uuid::Uuid;
 
+#[cfg(any(feature = "kv-mem", feature = "kv-rocksdb", feature = "kv-tikv"))]
 use super::Datastore;
+#[cfg(any(feature = "kv-mem", feature = "kv-rocksdb", feature = "kv-tikv"))]
 macro_rules! include_tests { ($new_ds:ident => $($name:ident),* $(,)?) => { $(super::$name::define_tests!($new_ds);)* }; }
 #[cfg(any(feature = "kv-mem", feature = "kv-rocksdb", feature = "kv-tikv"))]
 mod quota_backend_contract;
@@ -132,19 +136,22 @@ mod storage_format_test;
 #[cfg(feature = "kv-mem")]
 mod storage_migration_test;
 #[derive(Clone, Debug)]
+#[cfg(any(feature = "kv-mem", feature = "kv-rocksdb", feature = "kv-tikv"))]
 pub(crate) enum Kvs {
-	#[cfg_attr(not(feature = "kv-mem"), expect(dead_code))]
+	#[cfg(feature = "kv-mem")]
 	Mem,
-	#[cfg_attr(not(feature = "kv-rocksdb"), expect(dead_code))]
+	#[cfg(feature = "kv-rocksdb")]
 	Rocksdb,
-	#[cfg_attr(not(feature = "kv-tikv"), expect(dead_code))]
+	#[cfg(feature = "kv-tikv")]
 	Tikv,
 }
 
+#[cfg(any(feature = "kv-mem", feature = "kv-rocksdb", feature = "kv-tikv"))]
 trait CreateDs {
 	async fn create_ds(&self, id: Uuid) -> (std::sync::Arc<Datastore>, Kvs);
 }
 
+#[cfg(any(feature = "kv-mem", feature = "kv-rocksdb", feature = "kv-tikv"))]
 impl<F, Fut> CreateDs for F
 where
 	F: Fn(Uuid) -> Fut,

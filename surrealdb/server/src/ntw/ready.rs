@@ -353,7 +353,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn required_native_quota_readiness_checks_runtime_contract() {
-		let datastore = Arc::new(Datastore::new("memory").await.unwrap());
+		let datastore = Datastore::new("memory").await.unwrap();
 		datastore.check_version().await.unwrap();
 		let state = AppState {
 			client_ip: ClientIp::None,

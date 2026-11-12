@@ -156,5 +156,5 @@ mod retry_conflict_tests {
 
 mod native_quota;
 pub use native_quota::*;
-#[cfg(test)]
+#[cfg(all(test, any(feature = "kv-mem", feature = "kv-rocksdb", feature = "kv-tikv")))]
 pub(crate) use surrealdb_datastore::quota;

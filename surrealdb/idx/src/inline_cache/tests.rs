@@ -57,6 +57,7 @@ fn pointer_key<'a>(
 /// Defines the vertex table with the given caps.
 async fn define_table(store: &TestIndexStore, edges_cap: Option<u32>, refs_cap: Option<u32>) {
 	let txn = store.transaction(Write).await.unwrap();
+	txn.quota_usage(NS, DB).initialize_new_database().await.unwrap();
 	let mut table = TableDefinition::from_stored(&StoredTableDefinition::new(
 		NS,
 		DB,

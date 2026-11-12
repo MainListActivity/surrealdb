@@ -12,6 +12,7 @@ mod resource;
 #[cfg(any(
 	feature = "kv-mem",
 	feature = "kv-surrealkv",
+	all(feature = "kv-rocksdb", not(target_family = "wasm")),
 	all(feature = "kv-tikv", not(target_family = "wasm"))
 ))]
 mod storage;
@@ -27,6 +28,7 @@ pub use resource::*;
 #[cfg(any(
 	feature = "kv-mem",
 	feature = "kv-surrealkv",
+	all(feature = "kv-rocksdb", not(target_family = "wasm")),
 	all(feature = "kv-tikv", not(target_family = "wasm"))
 ))]
 pub use storage::{AolMode, SnapshotMode, SyncMode};
