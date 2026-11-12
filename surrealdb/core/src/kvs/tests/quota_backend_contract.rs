@@ -375,7 +375,6 @@ pub async fn generation_and_rebuild_epoch_contract(new_ds: impl CreateDs) {
 	assert_eq!(quota.begin_rebuild().await.unwrap(), 2);
 	quota.set_staged_record_count(&TableName::from("ent_generation"), 7).await.unwrap();
 	tx.commit().await.unwrap();
-	drop(quota);
 	drop(tx);
 
 	let tx = ds.transaction(TransactionType::Write).await.unwrap();
@@ -386,7 +385,6 @@ pub async fn generation_and_rebuild_epoch_contract(new_ds: impl CreateDs) {
 	quota.activate_validated_epoch(validated).await.unwrap();
 	tx.cancel().await.unwrap();
 
-	drop(quota);
 	drop(tx);
 	let restarted =
 		Arc::try_unwrap(ds).ok().expect("all datastore handles released before restart").restart();

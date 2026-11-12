@@ -149,7 +149,6 @@ async fn staged_rebuild_remains_fenced_until_validated_epoch_switch_commits() {
 	quota.increment_field_count(&table, 4).await.unwrap();
 	quota.increment_table_bucket_count(7, "ent-tables", 1).await.unwrap();
 	tx.commit().await.unwrap();
-	drop(quota);
 	drop(tx);
 
 	let tx = ds.transaction(TransactionType::Write).await.unwrap();
@@ -160,7 +159,6 @@ async fn staged_rebuild_remains_fenced_until_validated_epoch_switch_commits() {
 	quota.set_staged_field_count(&table, 10).await.unwrap();
 	quota.set_staged_table_bucket_count(7, "ent-tables", 2).await.unwrap();
 	tx.commit().await.unwrap();
-	drop(quota);
 	drop(tx);
 
 	let error = statement_error(&ds, "CREATE user:one SET name = 'blocked'", &database_owner).await;
@@ -184,7 +182,6 @@ async fn staged_rebuild_remains_fenced_until_validated_epoch_switch_commits() {
 	quota.activate_validated_epoch(validated).await.unwrap();
 	tx.cancel().await.unwrap();
 
-	drop(quota);
 	drop(tx);
 	let ds = std::sync::Arc::try_unwrap(ds)
 		.ok()

@@ -1068,6 +1068,7 @@ fn field_flexibility(exprs: &[Expr]) -> Vec<(String, bool)> {
 				| DefineStatement::Api(_)
 				| DefineStatement::Bucket(_)
 				| DefineStatement::Sequence(_)
+				| DefineStatement::Quota(_)
 				| DefineStatement::Type(_)
 				| DefineStatement::Module(_) => None,
 			},

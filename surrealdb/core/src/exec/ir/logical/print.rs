@@ -3495,48 +3495,6 @@ text_struct!(AlterAccess {
 	comment: AlterKind<String>
 });
 
-#[cfg(test)]
-mod tests {
-	use super::*;
-	use crate::val::Number;
-
-	/// `value` printed and read back, the whole text consumed.
-	fn reads_back<T: Text>(value: &T) -> T {
-		let mut out = String::new();
-		value.put(&mut out);
-		let mut c = Cursor::new(&out);
-		let read = T::get(&mut c).unwrap_or_else(|failure| panic!("{out}: {failure}"));
-		c.finish().unwrap_or_else(|failure| panic!("{out}: {failure}"));
-		read
-	}
-
-	#[test]
-	fn floats_values_and_kinds_read_back_exactly() {
-		let negative_nan = f64::from_bits(f64::NAN.to_bits() | (1 << 63));
-		for f in [f64::NAN, negative_nan, -0.0, 0.0, f64::INFINITY, f64::NEG_INFINITY, 0.1] {
-			assert_eq!(reads_back(&f).to_bits(), f.to_bits(), "{f:?}");
-		}
-		for f in [f32::NAN, -0.0, f32::INFINITY, f32::NEG_INFINITY, 0.1] {
-			assert_eq!(reads_back(&f).to_bits(), f.to_bits(), "{f:?}");
-		}
-		for f in [f64::NAN, -0.0, f64::INFINITY, f64::NEG_INFINITY] {
-			let value = Value::Number(Number::Float(f));
-			assert_eq!(
-				revision::to_vec(&reads_back(&value)).expect("encodes"),
-				revision::to_vec(&value).expect("encodes"),
-				"{f:?}"
-			);
-		}
-		let kind = crate::syn::kind("int | string").expect("a kind");
-		assert_eq!(reads_back(&kind), kind);
-		let mut c = Cursor::new("\"int trailing\"");
-		assert!(
-			<Kind as Text>::get(&mut c).is_err(),
-			"a kind is read from its canonical text only"
-		);
-	}
-}
-
 impl Text for crate::exec::vm::quota::QuotaCommand {
 	fn put(&self, out: &mut String) {
 		use crate::expr::statements::{InfoStatement, alter, define, rebuild, remove};
@@ -3675,5 +3633,47 @@ impl Text for crate::exec::vm::quota::QuotaCommand {
 			} => {}
 		}
 		c.fail("expected a native quota command".to_owned())
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::val::Number;
+
+	/// `value` printed and read back, the whole text consumed.
+	fn reads_back<T: Text>(value: &T) -> T {
+		let mut out = String::new();
+		value.put(&mut out);
+		let mut c = Cursor::new(&out);
+		let read = T::get(&mut c).unwrap_or_else(|failure| panic!("{out}: {failure}"));
+		c.finish().unwrap_or_else(|failure| panic!("{out}: {failure}"));
+		read
+	}
+
+	#[test]
+	fn floats_values_and_kinds_read_back_exactly() {
+		let negative_nan = f64::from_bits(f64::NAN.to_bits() | (1 << 63));
+		for f in [f64::NAN, negative_nan, -0.0, 0.0, f64::INFINITY, f64::NEG_INFINITY, 0.1] {
+			assert_eq!(reads_back(&f).to_bits(), f.to_bits(), "{f:?}");
+		}
+		for f in [f32::NAN, -0.0, f32::INFINITY, f32::NEG_INFINITY, 0.1] {
+			assert_eq!(reads_back(&f).to_bits(), f.to_bits(), "{f:?}");
+		}
+		for f in [f64::NAN, -0.0, f64::INFINITY, f64::NEG_INFINITY] {
+			let value = Value::Number(Number::Float(f));
+			assert_eq!(
+				revision::to_vec(&reads_back(&value)).expect("encodes"),
+				revision::to_vec(&value).expect("encodes"),
+				"{f:?}"
+			);
+		}
+		let kind = crate::syn::kind("int | string").expect("a kind");
+		assert_eq!(reads_back(&kind), kind);
+		let mut c = Cursor::new("\"int trailing\"");
+		assert!(
+			<Kind as Text>::get(&mut c).is_err(),
+			"a kind is read from its canonical text only"
+		);
 	}
 }

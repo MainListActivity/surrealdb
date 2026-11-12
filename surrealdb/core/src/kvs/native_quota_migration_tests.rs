@@ -19,21 +19,27 @@ fn options() -> NativeQuotaMigrationOptions {
 }
 
 async fn empty() -> Arc<Datastore> {
-	Datastore::builder().without_startup_transactions().build_with_path("memory").await.unwrap()
+	Datastore::builder()
+		.without_startup_transactions()
+		.build_with_path("memory")
+		.await
+		.expect("synthetic migration fixture")
 }
 
 async fn execute(ds: &Datastore, sql: &str, session: &Session) {
-	for result in ds.execute(sql, session, None).await.unwrap() {
-		result.result.unwrap();
+	for result in ds.execute(sql, session, None).await.expect("synthetic migration fixture") {
+		result.result.expect("synthetic migration fixture");
 	}
 }
 
 async fn previous() -> Arc<Datastore> {
 	let ds = empty().await;
-	let tx = ds.transaction(TransactionType::Write).await.unwrap();
-	tx.set_key(&VersionKey {}, &PREVIOUS_FORK_STORAGE_VERSION.into()).await.unwrap();
-	tx.set_key(&ForkStorageKey {}, &previous_marker()).await.unwrap();
-	tx.commit().await.unwrap();
+	let tx = ds.transaction(TransactionType::Write).await.expect("synthetic migration fixture");
+	tx.set_key(&VersionKey {}, &PREVIOUS_FORK_STORAGE_VERSION.into())
+		.await
+		.expect("synthetic migration fixture");
+	tx.set_key(&ForkStorageKey {}, &previous_marker()).await.expect("synthetic migration fixture");
+	tx.commit().await.expect("synthetic migration fixture");
 	assert!(ds.feature_cell().level().is_legacy());
 
 	execute(&ds, "DEFINE NAMESPACE tenant", &Session::owner()).await;
@@ -60,19 +66,23 @@ async fn previous() -> Arc<Datastore> {
 }
 
 async fn dump(ds: &Datastore) -> Vec<(Vec<u8>, Vec<u8>)> {
-	let tx = ds.transaction(TransactionType::Read).await.unwrap();
+	let tx = ds.transaction(TransactionType::Read).await.expect("synthetic migration fixture");
 	let result = tx
 		.scan_raw(RawRange::every_key_after(&Key::from(&b""[..])), u32::MAX, 0, None)
 		.await
-		.unwrap();
-	tx.cancel().await.unwrap();
+		.expect("synthetic migration fixture");
+	tx.cancel().await.expect("synthetic migration fixture");
 	result
 }
 
 async fn database(ds: &Datastore) -> (NamespaceId, DatabaseId) {
-	let tx = ds.transaction(TransactionType::Read).await.unwrap();
-	let database = tx.get_db_by_name("tenant", "app", None).await.unwrap().unwrap();
-	tx.cancel().await.unwrap();
+	let tx = ds.transaction(TransactionType::Read).await.expect("synthetic migration fixture");
+	let database = tx
+		.get_db_by_name("tenant", "app", None)
+		.await
+		.expect("synthetic migration fixture")
+		.expect("synthetic migration fixture");
+	tx.cancel().await.expect("synthetic migration fixture");
 	(database.namespace_id, database.database_id)
 }
 
@@ -343,7 +353,7 @@ async fn migration_permit_is_scoped_to_its_datastore_and_future() {
 	let journal = ds.begin_native_quota_migration(&options().snapshot_reference).await.unwrap();
 	let permit = migration_permit(&ds, &journal).unwrap();
 	let result = NATIVE_QUOTA_MIGRATION_PERMIT
-		.scope(permit.clone(), async {
+		.scope(Arc::clone(&permit), async {
 			assert!(migration_transaction(&other, TransactionType::Write).await.is_err());
 			let ordinary = ds.transaction(TransactionType::Write).await.unwrap();
 			assert!(
@@ -368,12 +378,13 @@ async fn migration_permit_is_scoped_to_its_datastore_and_future() {
 		.await;
 	assert_eq!(result, ());
 	assert!(NATIVE_QUOTA_MIGRATION_PERMIT.try_with(|_| ()).is_err());
-	let pending = NATIVE_QUOTA_MIGRATION_PERMIT.scope(permit, std::future::pending::<()>());
-	tokio::pin!(pending);
-	tokio::select! {
-		_ = &mut pending => unreachable!(),
-		_ = tokio::task::yield_now() => {}
+	{
+		let pending = NATIVE_QUOTA_MIGRATION_PERMIT.scope(permit, std::future::pending::<()>());
+		tokio::pin!(pending);
+		tokio::select! {
+			_ = &mut pending => unreachable!(),
+			_ = tokio::task::yield_now() => {}
+		}
 	}
-	drop(pending);
 	assert!(NATIVE_QUOTA_MIGRATION_PERMIT.try_with(|_| ()).is_err());
 }

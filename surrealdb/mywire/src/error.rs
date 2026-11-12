@@ -198,6 +198,7 @@ fn engine_number(err: &TypesError) -> Number {
 		| ErrorDetails::Serialization(_)
 		| ErrorDetails::Connection(_)
 		| ErrorDetails::Context => ER_UNKNOWN_ERROR,
+		ErrorDetails::Quota(_) => ER_UNKNOWN_ERROR,
 		// The kinds are not exhaustive: a kind added later has no number until it is given one.
 		_ => ER_UNKNOWN_ERROR,
 	}

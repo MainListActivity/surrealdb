@@ -209,7 +209,17 @@ async fn streaming_executor_returns_the_same_quota_structure_contract() {
 					assert!(error.is_none(), "{error:?}");
 					finished = true;
 				}
-				other => panic!("unexpected quota stream item: {other:?}"),
+				other @ (surrealdb_rpc::QueryStreamItem::Rows {
+					..
+				}
+				| surrealdb_rpc::QueryStreamItem::Frame {
+					..
+				}
+				| surrealdb_rpc::QueryStreamItem::Trace {
+					..
+				}) => {
+					panic!("unexpected quota stream item: {other:?}")
+				}
 			}
 		}
 		assert!(finished, "quota stream must finish successfully");
