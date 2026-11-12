@@ -618,8 +618,7 @@ pub(super) async fn step(
 					.get_db_quota(ctx.ns.namespace_id, ctx.db.database_id, None)
 					.await
 					.map_err(ControlFlow::Err)?
-				{
-					if policy.rules.iter().any(|rule| {
+					&& policy.rules.iter().any(|rule| {
 						rule.resource == crate::catalog::QuotaResource::Record
 							&& match &rule.selector {
 								crate::catalog::QuotaSelector::Exact(name) => {
@@ -630,10 +629,9 @@ pub(super) async fn step(
 								}
 							}
 					}) {
-						return Err(ControlFlow::Err(crate::catalog::Error::QuotaUsageInvalid {
+					return Err(ControlFlow::Err(crate::catalog::Error::QuotaUsageInvalid {
                             reason: format!("record quota accounting for lightweight relation '{}' is unsupported; remove its matching RECORD rule before writing this relation", rid.table),
                         }.into()));
-					}
 				}
 				// A lightweight edge is stored as these keys alone, so the
 				// edge they create is noted as `store` notes a record it

@@ -601,15 +601,14 @@ impl Datastore {
 			bail!(incompatible("a read-only datastore cannot be migrated"));
 		}
 		let current = StorageVersion::current();
-		if let Some(stored) = self.storage_version().await? {
-			if stored.triple() > current.triple()
+		if let Some(stored) = self.storage_version().await?
+			&& (stored.triple() > current.triple()
 				|| (source == PREVIOUS_FORK_STORAGE_VERSION
 					&& stored.triple() != (3, 3, 0)
 					&& !(resuming && stored == current))
-				|| (source == MajorVersion::UPSTREAM_LATEST && stored.triple().0 != 4)
-			{
-				bail!(incompatible("semantic storage version does not match the migration source"));
-			}
+				|| (source == MajorVersion::UPSTREAM_LATEST && stored.triple().0 != 4))
+		{
+			bail!(incompatible("semantic storage version does not match the migration source"));
 		}
 		for (id, record) in self.applied_migration_ids().await? {
 			if !migration::MIGRATIONS.iter().any(|known| {

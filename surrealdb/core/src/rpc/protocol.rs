@@ -2169,7 +2169,7 @@ pub trait RpcProtocol {
 			// needs, so it names the principal the query actually runs as rather
 			// than whoever the session belongs to by the time it finishes.
 			let principal = AuthPrincipalSnapshot::capture(&session);
-			(query, vars, read_only, trace, session.clone(), principal)
+			(query, vars, read_only, trace, session, principal)
 		};
 
 		// Kept so the wall-clock guard below can stop the execution

@@ -206,6 +206,7 @@ pub(super) fn classify(err: &Error, dialect: Dialect) -> (&'static str, Option<i
 		| ErrorDetails::Serialization(_)
 		| ErrorDetails::NotFound(_)
 		| ErrorDetails::Connection(_)
+		| ErrorDetails::Quota(_)
 		| ErrorDetails::Internal
 		| ErrorDetails::Context => engine_code(err.message()).unwrap_or(OTHER),
 		// The kinds are not exhaustive: one added later is read from its message too.

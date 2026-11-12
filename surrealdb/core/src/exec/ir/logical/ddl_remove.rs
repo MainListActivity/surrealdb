@@ -251,14 +251,12 @@ pub(super) fn plan_remove(remove: &RemoveStatement, checks: DdlChecks) -> Planne
 pub(super) fn plan_rebuild(rebuild: &RebuildStatement) -> Planned<DdlPlan<'_>> {
 	let s = Slots::new();
 	match rebuild {
-		RebuildStatement::Quota(stmt) => {
-			return super::ddl::plan_quota(
-				&stmt.database,
-				crate::exec::vm::quota::QuotaCommand::Rebuild {
-					if_needed: stmt.if_needed,
-				},
-			);
-		}
+		RebuildStatement::Quota(stmt) => super::ddl::plan_quota(
+			&stmt.database,
+			crate::exec::vm::quota::QuotaCommand::Rebuild {
+				if_needed: stmt.if_needed,
+			},
+		),
 		RebuildStatement::Index(stmt) => {
 			let op = LogOp::Rebuild(Box::new(RebuildAttrs {
 				index: stmt.name.clone(),

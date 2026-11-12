@@ -3637,7 +3637,42 @@ impl Text for crate::exec::vm::quota::QuotaCommand {
 					});
 				}
 			}
-			_ => {}
+			Expr::Literal(_)
+			| Expr::Param(_)
+			| Expr::Idiom(_)
+			| Expr::Table(_)
+			| Expr::Mock(_)
+			| Expr::Block(_)
+			| Expr::Constant(_)
+			| Expr::Prefix {
+				..
+			}
+			| Expr::Postfix {
+				..
+			}
+			| Expr::Binary {
+				..
+			}
+			| Expr::FunctionCall(_)
+			| Expr::Closure(_)
+			| Expr::Break
+			| Expr::Continue
+			| Expr::Return(_)
+			| Expr::Throw(_)
+			| Expr::IfElse(_)
+			| Expr::Select(_)
+			| Expr::Create(_)
+			| Expr::Update(_)
+			| Expr::Upsert(_)
+			| Expr::Delete(_)
+			| Expr::Relate(_)
+			| Expr::Insert(_)
+			| Expr::Foreach(_)
+			| Expr::Let(_)
+			| Expr::Sleep(_)
+			| Expr::Explain {
+				..
+			} => {}
 		}
 		c.fail("expected a native quota command".to_owned())
 	}

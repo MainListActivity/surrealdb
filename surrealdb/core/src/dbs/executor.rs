@@ -2874,7 +2874,9 @@ impl Executor {
 				namespace.read_only() && database.read_only()
 			}
 			TopLevelStatement::Ast(TopLevelExpr::Show(_) | TopLevelExpr::Kill(_)) => true,
-			_ => false,
+			TopLevelStatement::Ast(_)
+			| TopLevelStatement::Plan(_)
+			| TopLevelStatement::Surreal(_) => false,
 		};
 		if !stmt.read_only()
 			&& !bypass_quota_fence
