@@ -20,7 +20,7 @@ value = "NONE"
 error = "The sequence 'seq2' does not exist"
 
 [[test.results]]
-value = '''{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, compatibility: 4, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, types: {  }, users: {  } }'''
+value = '''{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, compatibility: 4, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, quota: { defined: false, generation: NONE }, sequences: {  }, tables: {  }, types: {  }, users: {  } }'''
 
 */
 DEFINE SEQUENCE seq1;

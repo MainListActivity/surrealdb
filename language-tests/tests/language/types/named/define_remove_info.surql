@@ -25,10 +25,10 @@ error = "The type 'posint' already exists"
 value = "NONE"
 
 [[test.results]]
-value = """{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, compatibility: 4, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, types: { address: "DEFINE TYPE address AS { street: none | null | string, zip: none | null | int } SQL TYPE POSTGRESQL '(street text, zip integer)' PERMISSIONS FULL", feeling: "DEFINE TYPE feeling AS mood | none SQL TYPE POSTGRESQL 'mood' PERMISSIONS FULL", mood: "DEFINE TYPE mood AS 'sad' | 'ok' PERMISSIONS FULL", posint: "DEFINE TYPE posint AS int CONSTRAINT positive ASSERT $value > 0 ASSERT $value < 1000 DEFAULT 1 SQL TYPE POSTGRESQL 'integer' PERMISSIONS FULL" }, users: {  } }"""
+value = """{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, compatibility: 4, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, quota: { defined: false, generation: NONE }, sequences: {  }, tables: {  }, types: { address: "DEFINE TYPE address AS { street: none | null | string, zip: none | null | int } SQL TYPE POSTGRESQL '(street text, zip integer)' PERMISSIONS FULL", feeling: "DEFINE TYPE feeling AS mood | none SQL TYPE POSTGRESQL 'mood' PERMISSIONS FULL", mood: "DEFINE TYPE mood AS 'sad' | 'ok' PERMISSIONS FULL", posint: "DEFINE TYPE posint AS int CONSTRAINT positive ASSERT $value > 0 ASSERT $value < 1000 DEFAULT 1 SQL TYPE POSTGRESQL 'integer' PERMISSIONS FULL" }, users: {  } }"""
 
 [[test.results]]
-value = """{ accesses: [], analyzers: [], apis: [], buckets: [], compatibility: 4, configs: [], extensions: [], functions: [], models: [], params: [], sequences: [], tables: [], types: [{ asserts: [], kind: '{ street: none | null | string, zip: none | null | int }', name: 'address', permissions: true, sql_type: '(street text, zip integer)' }, { asserts: [], kind: 'mood | none', name: 'feeling', permissions: true, sql_type: 'mood' }, { asserts: [], kind: "'sad' | 'ok'", labels: ['sad', 'ok'], name: 'mood', permissions: true }, { asserts: [{ check: '$value > 0', name: 'positive' }, { check: '$value < 1000' }], default: '1', kind: 'int', name: 'posint', permissions: true, sql_type: 'integer' }], users: [] }"""
+value = """{ accesses: [], analyzers: [], apis: [], buckets: [], compatibility: 4, configs: [], extensions: [], functions: [], models: [], params: [], quota: { defined: false, generation: NONE }, sequences: [], tables: [], types: [{ asserts: [], kind: '{ street: none | null | string, zip: none | null | int }', name: 'address', permissions: true, sql_type: '(street text, zip integer)' }, { asserts: [], kind: 'mood | none', name: 'feeling', permissions: true, sql_type: 'mood' }, { asserts: [], kind: "'sad' | 'ok'", labels: ['sad', 'ok'], name: 'mood', permissions: true }, { asserts: [{ check: '$value > 0', name: 'positive' }, { check: '$value < 1000' }], default: '1', kind: 'int', name: 'posint', permissions: true, sql_type: 'integer' }], users: [] }"""
 
 [[test.results]]
 value = "NONE"
@@ -49,7 +49,7 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = """{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, compatibility: 4, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, types: { feeling: "DEFINE TYPE feeling AS string SQL TYPE POSTGRESQL 'text' PERMISSIONS FULL", mood: "DEFINE TYPE mood AS 'sad' | 'ok' PERMISSIONS FULL" }, users: {  } }"""
+value = """{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, compatibility: 4, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, quota: { defined: false, generation: NONE }, sequences: {  }, tables: {  }, types: { feeling: "DEFINE TYPE feeling AS string SQL TYPE POSTGRESQL 'text' PERMISSIONS FULL", mood: "DEFINE TYPE mood AS 'sad' | 'ok' PERMISSIONS FULL" }, users: {  } }"""
 
 */
 

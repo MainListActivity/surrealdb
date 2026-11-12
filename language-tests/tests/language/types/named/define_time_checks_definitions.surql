@@ -52,7 +52,7 @@ error = "Invalid statement: The bucket 'b' cannot be defined: the type 'missing'
 error = "Invalid statement: The API config cannot be defined: the type 'missing' it names does not exist"
 
 [[test.results]]
-value = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, compatibility: 4, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: { t: 'DEFINE TABLE t TYPE ANY SCHEMALESS PERMISSIONS NONE' }, types: {  }, users: {  } }"
+value = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, compatibility: 4, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, quota: { defined: false, generation: NONE }, sequences: {  }, tables: { t: 'DEFINE TABLE t TYPE ANY SCHEMALESS PERMISSIONS NONE' }, types: {  }, users: {  } }"
 
 [[test.results]]
 value = "{  }"

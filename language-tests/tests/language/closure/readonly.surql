@@ -14,7 +14,7 @@ value = "{ database: 'strict_test', namespace: 'test' }"
 error = "The table 'foo' does not exist"
 
 [[test.results]]
-value = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, compatibility: 4, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, types: {  }, users: {  } }"
+value = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, compatibility: 4, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, quota: { defined: false, generation: NONE }, sequences: {  }, tables: {  }, types: {  }, users: {  } }"
 
 [[test.results]]
 error = "The table 'foo' does not exist"

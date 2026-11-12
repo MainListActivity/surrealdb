@@ -58,7 +58,7 @@ value = "NONE"
 value = "['angry', 'sorrowful', 'meh', 'okay', 'fine', 'happy', 'ecstatic']"
 
 [[test.results]]
-value = """{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, compatibility: 4, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, types: { mood: "DEFINE TYPE mood AS 'angry' | 'sorrowful' | 'meh' | 'okay' | 'fine' | 'happy' | 'ecstatic' COMMENT 'feelings' PERMISSIONS FULL" }, users: {  } }"""
+value = """{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, compatibility: 4, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, quota: { defined: false, generation: NONE }, sequences: {  }, tables: {  }, types: { mood: "DEFINE TYPE mood AS 'angry' | 'sorrowful' | 'meh' | 'okay' | 'fine' | 'happy' | 'ecstatic' COMMENT 'feelings' PERMISSIONS FULL" }, users: {  } }"""
 
 [[test.results]]
 value = "NONE"
@@ -79,7 +79,7 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = """{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, compatibility: 4, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, types: { dup: "DEFINE TYPE dup AS 'a' | 'b' PERMISSIONS FULL" }, users: {  } }"""
+value = """{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, compatibility: 4, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, quota: { defined: false, generation: NONE }, sequences: {  }, tables: {  }, types: { dup: "DEFINE TYPE dup AS 'a' | 'b' PERMISSIONS FULL" }, users: {  } }"""
 
 */
 

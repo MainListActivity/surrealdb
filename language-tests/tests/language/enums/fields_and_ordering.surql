@@ -139,7 +139,7 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, compatibility: 4, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: { person: 'DEFINE TABLE person TYPE NORMAL SCHEMAFULL PERMISSIONS NONE' }, types: {  }, users: {  } }"
+value = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, compatibility: 4, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, quota: { defined: false, generation: NONE }, sequences: {  }, tables: { person: 'DEFINE TABLE person TYPE NORMAL SCHEMAFULL PERMISSIONS NONE' }, types: {  }, users: {  } }"
 
 */
 
