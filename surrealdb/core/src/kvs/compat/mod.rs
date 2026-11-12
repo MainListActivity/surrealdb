@@ -70,6 +70,3 @@ mod v3_1_1;
 pub(crate) mod v3_3_0;
 #[rustfmt::skip]
 mod v3_4_0;
-
-#[rustfmt::skip]
-mod v3_2_4;
