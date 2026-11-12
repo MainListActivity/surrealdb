@@ -806,7 +806,7 @@ mod tests {
 						assert_redacted(value, forbidden);
 					}
 				}
-				_ => {}
+				Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
 			}
 		}
 		assert_redacted(&value, &forbidden);
