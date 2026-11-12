@@ -2181,6 +2181,59 @@ jobs:
   # Required checks
   # ----------------------------------------
 
+  quota-backend-preflight:
+    name: Native quota preflight (${{ matrix.backend }})
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { backend: memory, feature: kv-mem, module: mem, runner: ubuntu-24.04-arm }
+          - { backend: rocksdb, feature: kv-rocksdb, module: rocksdb, runner: ubuntu-24.04 }
+          - { backend: tikv, feature: kv-tikv, module: tikv, runner: ubuntu-24.04 }
+    env:
+      RUST_MIN_STACK: "8388608"
+    steps:
+      - name: Harden the runner
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+      - name: Checkout exact source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          save-cache: false
+          free-disk-space: true
+      - name: Start disposable TiKV cluster
+        if: matrix.backend == 'tikv'
+        run: bash scripts/native-quota/disposable_tikv_ci.sh start
+      - name: Verify and run backend contracts
+        env:
+          FEATURE: ${{ matrix.feature }}
+          MODULE: ${{ matrix.module }}
+          SURREAL_TIKV_TEST_ALLOW_DESTRUCTIVE: ${{ matrix.backend == 'tikv' && '1' || '' }}
+          SURREAL_TIKV_TEST_ENDPOINT: ${{ matrix.backend == 'tikv' && '127.0.0.1:2379' || '' }}
+        run: |
+          set -euo pipefail
+          tests="$(cargo test -p surrealdb-core --no-default-features --features "$FEATURE,test-hooks" --test native_quota_backends -- --list)"
+          count="$(grep -c "^${MODULE}::quota_.*: test$" <<<"$tests" || true)"
+          test "$count" -ge 5 || { echo "::error::expected at least five contracts; found $count"; exit 1; }
+          cargo test -p surrealdb-core --no-default-features --features "$FEATURE,test-hooks" --test native_quota_backends "${MODULE}::quota_" -- --test-threads=1
+      - name: Run RocksDB crash/restart contract
+        if: matrix.backend == 'rocksdb'
+        run: cargo test -p surrealdb-core --no-default-features --features kv-rocksdb,test-hooks --test native_quota_backends quota_rocksdb_certification -- --test-threads=1
+      - name: Stop disposable TiKV cluster
+        if: always() && matrix.backend == 'tikv'
+        run: bash scripts/native-quota/disposable_tikv_ci.sh stop
+
   required-checks:
     name: Required checks
     runs-on: ubuntu-latest
@@ -2231,6 +2284,7 @@ jobs:
       - sdk-engines-server
       # KVS tests
       - kvs-engines
+      - quota-backend-preflight
       # SurrealQL language tests
       - lang-tests
       - upgrade-harness
@@ -2292,6 +2346,7 @@ jobs:
             "${{ needs.sdk-engines.result }}"
             "${{ needs.sdk-engines-server.result }}"
             "${{ needs.kvs-engines.result }}"
+            "${{ needs.quota-backend-preflight.result }}"
             "${{ needs.lang-tests.result }}"
             "${{ needs.upgrade-harness.result }}"
             "${{ needs.upgrade-tests.result }}"
@@ -2325,6 +2380,11 @@ jobs:
               echo "❌ mysql check did not succeed: ${{ needs.mysql.result }}"
               failed=true
             fi
+          fi
+
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ needs.quota-backend-preflight.result }}" != "success" ]]; then
+            echo "❌ Native quota backend preflight did not succeed"
+            failed=true
           fi
 
           if [[ "$failed" == "true" ]]; then
