@@ -247,6 +247,7 @@ mod tikv {
 }
 
 /// Preserve caller-owned transaction coverage through the 4.0 request API.
+#[cfg(any(feature = "kv-mem", feature = "kv-rocksdb", feature = "kv-tikv"))]
 trait QuotaTransactionTestExt {
 	async fn execute_with_transaction(
 		&self,
@@ -256,6 +257,7 @@ trait QuotaTransactionTestExt {
 		transaction: std::sync::Arc<crate::kvs::Transaction>,
 	) -> Result<Vec<crate::dbs::QueryResult>, surrealdb_types::Error>;
 }
+#[cfg(any(feature = "kv-mem", feature = "kv-rocksdb", feature = "kv-tikv"))]
 impl QuotaTransactionTestExt for Datastore {
 	async fn execute_with_transaction(
 		&self,
