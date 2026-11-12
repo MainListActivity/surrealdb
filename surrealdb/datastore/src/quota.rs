@@ -2184,12 +2184,10 @@ mod memory_transaction_tests {
 		shared_metadata_fence_exercise(factory, sequences).await;
 	}
 
-	#[tokio::test]
-	async fn lightweight_guard_keeps_transaction_generation_consistent() {
+	async fn lightweight_guard_exercise(factory: TransactionFactory, sequences: Sequences) {
 		use crate::catalog::{Relation, StoredTableDefinition, TableId};
 		use crate::key::schema::TableKey;
 
-		let (factory, sequences) = empty_factory().await;
 		let tx = factory.transaction(TransactionType::Write, sequences.clone()).await.unwrap();
 		tx.quota_usage(NS, DB).initialize_new_database().await.unwrap();
 		tx.set(key(1), b"record".to_vec()).await.unwrap();
@@ -2212,6 +2210,30 @@ mod memory_transaction_tests {
 		.unwrap();
 		tx.guard_lightweight_quota_writes(NS, DB).await.unwrap();
 		tx.commit().await.unwrap();
+	}
+
+	#[tokio::test]
+	async fn lightweight_guard_keeps_transaction_generation_consistent() {
+		let (factory, sequences) = empty_factory().await;
+		lightweight_guard_exercise(factory, sequences).await;
+	}
+
+	#[cfg(feature = "kv-surrealkv")]
+	#[tokio::test]
+	async fn surrealkv_lightweight_guard_keeps_transaction_generation_consistent() {
+		let dir = temp_dir::TempDir::new().unwrap();
+		let path = format!("surrealkv:{}", dir.path().display());
+		let builder = surrealdb_kvs_any::Backends::community()
+			.new_transaction_builder(&path, Default::default(), ConfigMap::default())
+			.await
+			.unwrap();
+		let factory = TransactionFactory::new(
+			Arc::new(crate::triggers::CommitTriggers::new()),
+			builder,
+			Arc::new(Default::default()),
+		);
+		let sequences = Sequences::new(factory.clone(), uuid::Uuid::new_v4());
+		lightweight_guard_exercise(factory, sequences).await;
 	}
 
 	#[tokio::test]
