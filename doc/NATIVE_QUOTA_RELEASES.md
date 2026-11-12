@@ -47,8 +47,8 @@ has a successful upstream `CI` run, or after a manual request that proves the
 same fact through the Actions API. It then runs:
 
 1. compatibility, capability, format, and release-contract tests;
-2. memory and RocksDB hard-quota contract suites, including RocksDB
-   restart/fault certification;
+2. memory, RocksDB, and disposable three-node TiKV hard-quota contract suites,
+   including RocksDB restart/fault certification;
 3. the fixed-workload RocksDB regression benchmark;
 4. one amd64 and one arm64 CLI build for the same release and Git SHA;
 5. one multi-architecture OCI build from those CLI artifacts;

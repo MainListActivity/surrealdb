@@ -177,6 +177,10 @@ jobs:
             feature: kv-rocksdb
             module: rocksdb
             runner: ${{ github.repository == 'surrealdb/surrealdb' && 'runner-amd-32-cores' || 'ubuntu-24.04' }}
+          - backend: tikv
+            feature: kv-tikv
+            module: tikv
+            runner: ubuntu-24.04
     steps:
       - name: Harden the runner
         uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
@@ -217,10 +221,16 @@ jobs:
             exit 1
           }
 
+      - name: Start disposable TiKV cluster
+        if: matrix.backend == 'tikv'
+        run: bash scripts/native-quota/disposable_tikv_ci.sh start
+
       - name: Run backend-neutral and persistence contracts
         env:
           FEATURE: ${{ matrix.feature }}
           MODULE: ${{ matrix.module }}
+          SURREAL_TIKV_TEST_ALLOW_DESTRUCTIVE: ${{ matrix.backend == 'tikv' && '1' || '' }}
+          SURREAL_TIKV_TEST_ENDPOINT: ${{ matrix.backend == 'tikv' && '127.0.0.1:2379' || '' }}
         run: |
           set -euo pipefail
           cargo test -p surrealdb-core \
@@ -239,6 +249,10 @@ jobs:
           --test native_quota_backends
           quota_rocksdb_certification
           -- --test-threads=1
+
+      - name: Stop disposable TiKV cluster
+        if: always() && matrix.backend == 'tikv'
+        run: bash scripts/native-quota/disposable_tikv_ci.sh stop
 
   performance-gate:
     name: RocksDB quota regression gate
