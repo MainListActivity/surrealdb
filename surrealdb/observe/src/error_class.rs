@@ -79,6 +79,7 @@ pub fn classify_types_error(err: &surrealdb_types::Error) -> &'static str {
 		ErrorDetails::Thrown => CLIENT,
 		ErrorDetails::Internal => INTERNAL,
 		ErrorDetails::Context => INTERNAL,
+		ErrorDetails::Quota(_) => INTERNAL,
 		// `ErrorDetails` is `#[non_exhaustive]`. New variants land in
 		// the `internal` bucket by default so unclassified errors do
 		// not silently collapse to the `-` sentinel; revisit when a

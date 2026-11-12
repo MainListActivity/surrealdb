@@ -1,7 +1,7 @@
 //! Two-phase recovery probe for the dedicated loopback test cluster.
 //! Run `seed NONCE`, restart/kill disposable TiKV nodes, then `verify NONCE`.
 use surrealdb_cnf::ConfigMap;
-use surrealdb_kvs::{TransactionBuilder, TransactionType};
+use surrealdb_kvs::TransactionType;
 use surrealdb_kvs_any::{BackendProvider, ConnectContext};
 use surrealdb_kvs_tikv::TikvProvider;
 use tokio_util::sync::CancellationToken;

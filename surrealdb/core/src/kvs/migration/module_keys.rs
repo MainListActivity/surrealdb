@@ -570,7 +570,8 @@ mod tests {
 				.build_with_path("memory")
 				.await
 				.unwrap();
-			let txn = crate::kvs::migration::transaction(ds, TransactionType::Write).await.unwrap();
+			let txn =
+				crate::kvs::migration::transaction(&ds, TransactionType::Write).await.unwrap();
 			let database = txn.ensure_ns_db(None, "test", "test").await.unwrap();
 			txn.commit().await.unwrap();
 			let (ns, db) = (database.namespace_id, database.database_id);
