@@ -37,7 +37,7 @@ mod builder;
 mod count;
 mod doc_ids;
 mod kind;
-#[cfg(test)]
+#[cfg(all(test, feature = "kv-surrealkv"))]
 pub(super) use kind::test_sink::set_scan_batch;
 pub(crate) mod materialise;
 mod replay;
