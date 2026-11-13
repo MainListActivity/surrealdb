@@ -7,12 +7,19 @@ use crate::iam::{Level, Role};
 use crate::kvs::Datastore;
 
 async fn query_value(ds: &Datastore, sql: &str, session: &Session) -> Value {
-	ds.execute(sql, session, None).await.unwrap().remove(0).result.unwrap()
+	ds.execute(sql, session, None)
+		.await
+		.expect("quota fixture operation must succeed")
+		.remove(0)
+		.result
+		.expect("quota fixture operation must succeed")
 }
 
 async fn statement_error(ds: &Datastore, sql: &str, session: &Session) -> String {
 	match ds.execute(sql, session, None).await {
-		Ok(mut responses) => responses.remove(0).result.unwrap_err().to_string(),
+		Ok(mut responses) => {
+			responses.remove(0).result.expect_err("quota fixture operation must fail").to_string()
+		}
 		Err(error) => error.to_string(),
 	}
 }

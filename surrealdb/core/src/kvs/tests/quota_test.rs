@@ -9,33 +9,57 @@ use crate::key::schema::{QuotaGenerationKey, QuotaPolicyKey};
 use crate::kvs::Datastore;
 
 async fn setup() -> std::sync::Arc<Datastore> {
-	let ds = Datastore::builder().build_with_path("memory").await.unwrap();
+	let ds = Datastore::builder()
+		.build_with_path("memory")
+		.await
+		.expect("quota fixture operation must succeed");
 	let root = Session::owner();
 	let ns = Session::owner().with_ns("tenant");
-	ds.execute("DEFINE NAMESPACE tenant", &root, None).await.unwrap();
-	ds.execute("DEFINE DATABASE app", &ns, None).await.unwrap();
+	ds.execute("DEFINE NAMESPACE tenant", &root, None)
+		.await
+		.expect("quota fixture operation must succeed");
+	ds.execute("DEFINE DATABASE app", &ns, None)
+		.await
+		.expect("quota fixture operation must succeed");
 	ds
 }
 
 async fn generation(ds: &Datastore) -> Option<u64> {
-	let tx = ds.transaction(TransactionType::Read).await.unwrap();
-	let db = tx.get_db_by_name("tenant", "app", None).await.unwrap().unwrap();
-	let generation =
-		tx.get_db_quota(db.namespace_id, db.database_id, None).await.unwrap().map(|x| x.generation);
-	tx.cancel().await.unwrap();
+	let tx =
+		ds.transaction(TransactionType::Read).await.expect("quota fixture operation must succeed");
+	let db = tx
+		.get_db_by_name("tenant", "app", None)
+		.await
+		.expect("quota fixture operation must succeed")
+		.expect("quota fixture operation must succeed");
+	let generation = tx
+		.get_db_quota(db.namespace_id, db.database_id, None)
+		.await
+		.expect("quota fixture operation must succeed")
+		.map(|x| x.generation);
+	tx.cancel().await.expect("quota fixture operation must succeed");
 	generation
 }
 
 async fn statement_error(ds: &Datastore, sql: &str, session: &Session) -> String {
 	match ds.execute(sql, session, None).await {
-		Ok(mut responses) => responses.remove(responses.len() - 1).result.unwrap_err().to_string(),
+		Ok(mut responses) => responses
+			.remove(responses.len() - 1)
+			.result
+			.expect_err("quota fixture operation must fail")
+			.to_string(),
 		Err(error) => error.to_string(),
 	}
 }
 
 async fn import_error(ds: &Datastore, sql: &str, session: &Session) -> String {
-	let mut responses = ds.import(sql, session).await.unwrap();
-	responses.remove(responses.len() - 1).result.unwrap_err().to_string()
+	let mut responses =
+		ds.import(sql, session).await.expect("quota fixture operation must succeed");
+	responses
+		.remove(responses.len() - 1)
+		.result
+		.expect_err("quota fixture operation must fail")
+		.to_string()
 }
 
 #[tokio::test]

@@ -4,6 +4,7 @@ use std::borrow::Cow;
 use std::sync::Arc;
 
 use surrealdb_datastore::WriteBatch;
+use surrealdb_expr::expr::Dir;
 use surrealdb_kvs::TransactionType;
 use surrealdb_kvs::key::KVKey;
 
@@ -21,7 +22,10 @@ async fn run(ds: &Datastore, session: &Session, sql: &str) {
 }
 
 async fn setup(packed: bool) -> (Arc<Datastore>, Session) {
-	let ds = Datastore::builder().build_with_path("memory").await.unwrap();
+	let ds = Datastore::builder()
+		.build_with_path("memory")
+		.await
+		.expect("quota fixture operation must succeed");
 	let session = Session::owner().with_ns("tenant").with_db("app");
 	run(&ds, &Session::owner(), "DEFINE NAMESPACE tenant; USE NS tenant; DEFINE DATABASE app")
 		.await;
@@ -45,34 +49,56 @@ async fn setup(packed: bool) -> (Arc<Datastore>, Session) {
 }
 
 async fn assert_count(ds: &Datastore, session: &Session, expected: u64) {
-	let tx = ds.transaction(TransactionType::Read).await.unwrap();
-	let db = tx.get_db_by_name("tenant", "app", None).await.unwrap().unwrap();
+	let tx =
+		ds.transaction(TransactionType::Read).await.expect("quota fixture operation must succeed");
+	let db = tx
+		.get_db_by_name("tenant", "app", None)
+		.await
+		.expect("quota fixture operation must succeed")
+		.expect("quota fixture operation must succeed");
 	assert_eq!(
-		tx.quota_usage(db.namespace_id, db.database_id).record_count(&"item".into()).await.unwrap(),
+		tx.quota_usage(db.namespace_id, db.database_id)
+			.record_count(&"item".into())
+			.await
+			.expect("quota fixture operation must succeed"),
 		expected
 	);
-	tx.cancel().await.unwrap();
-	let mut responses = ds.execute("SELECT * FROM item", session, None).await.unwrap();
-	let surrealdb_types::Value::Array(rows) = responses.remove(0).result.unwrap() else {
+	tx.cancel().await.expect("quota fixture operation must succeed");
+	let mut responses = ds
+		.execute("SELECT * FROM item", session, None)
+		.await
+		.expect("quota fixture operation must succeed");
+	let surrealdb_types::Value::Array(rows) =
+		responses.remove(0).result.expect("quota fixture operation must succeed")
+	else {
 		panic!("expected record array");
 	};
 	assert_eq!(rows.len() as u64, expected, "stored records and quota usage must agree");
 }
 
 async fn assert_encoding(ds: &Datastore, packed: bool) {
-	let tx = ds.transaction(TransactionType::Read).await.unwrap();
-	let db = tx.get_db_by_name("tenant", "app", None).await.unwrap().unwrap();
+	let tx =
+		ds.transaction(TransactionType::Read).await.expect("quota fixture operation must succeed");
+	let db = tx
+		.get_db_by_name("tenant", "app", None)
+		.await
+		.expect("quota fixture operation must succeed")
+		.expect("quota fixture operation must succeed");
 	let table = TableName::from("item");
 	let id = RecordIdKey::Number(1);
 	let key =
 		RecordKey::new(db.namespace_id, db.database_id, Cow::Borrowed(&table), Cow::Borrowed(&id));
-	let bytes = tx.get_key_raw(&key, None).await.unwrap().expect("record exists");
+	let bytes = tx
+		.get_key_raw(&key, None)
+		.await
+		.expect("quota fixture operation must succeed")
+		.expect("record exists");
 	assert_eq!(
 		StoredRecord::is_packed_bytes(&bytes),
 		packed,
 		"test must exercise its requested encoding"
 	);
-	tx.cancel().await.unwrap();
+	tx.cancel().await.expect("quota fixture operation must succeed");
 }
 
 async fn sql_write_paths(packed: bool) {
@@ -102,7 +128,8 @@ async fn sql_write_paths(packed: bool) {
 		"UPSERT item:3 SET value = 3 RETURN AFTER",
 		"INSERT INTO item [{ id: item:3, value: 3 }, { id: item:4, value: 4 }] RETURN NONE",
 	] {
-		let mut result = ds.execute(sql, &session, None).await.unwrap();
+		let mut result =
+			ds.execute(sql, &session, None).await.expect("quota fixture operation must succeed");
 		let error = result.remove(0).result.expect_err(sql);
 		assert_eq!(error.kind_str(), "Quota", "{sql}: {error}");
 		assert_count(&ds, &session, 2).await;
@@ -135,7 +162,8 @@ enum WritePath {
 
 async fn write_one(ds: &Datastore, path: WritePath, id: i64) -> anyhow::Result<()> {
 	let tx = ds.transaction(TransactionType::Write).await?;
-	let db = tx.get_db_by_name("tenant", "app", None).await?.unwrap();
+	let db =
+		tx.get_db_by_name("tenant", "app", None).await?.expect("write path fixture must exist");
 	let (ns, db) = (db.namespace_id, db.database_id);
 	let tb = TableName::from("item");
 	let id = RecordIdKey::Number(id);
@@ -329,7 +357,7 @@ async fn lightweight_relations_fail_closed_without_partial_edges_or_rebuild_fenc
 			db,
 			tb: Cow::Borrowed(&person.table),
 			id: Cow::Borrowed(&person.key),
-			dir: surrealdb_expr::expr::Dir::Out,
+			dir: Dir::Out,
 			foreign_table: Cow::Borrowed(&edge.table),
 			foreign_key: Cow::Borrowed(&edge.key),
 		};
@@ -338,7 +366,7 @@ async fn lightweight_relations_fail_closed_without_partial_edges_or_rebuild_fenc
 			db,
 			tb: Cow::Borrowed(&person.table),
 			id: Cow::Borrowed(&person.key),
-			dir: surrealdb_expr::expr::Dir::Out,
+			dir: Dir::Out,
 			foreign_table: Cow::Borrowed(&edge.table),
 			foreign_key: Cow::Borrowed(&edge.key),
 			target_table: Cow::Borrowed(&other.table),
@@ -349,7 +377,7 @@ async fn lightweight_relations_fail_closed_without_partial_edges_or_rebuild_fenc
 			db,
 			tb: Cow::Borrowed(&person.table),
 			id: Cow::Borrowed(&person.key),
-			dir: surrealdb_expr::expr::Dir::Out,
+			dir: Dir::Out,
 			edge_table: Cow::Borrowed(&edge.table),
 			chunk_start: Cow::Borrowed(&edge.key),
 		};

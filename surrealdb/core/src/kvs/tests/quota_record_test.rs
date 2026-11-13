@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use surrealdb_kvs::TransactionType;
 use tokio::sync::Barrier;
+use tokio::task::yield_now;
 
 use super::QuotaTransactionTestExt;
 use crate::catalog::Error;
@@ -10,32 +11,54 @@ use crate::dbs::Session;
 use crate::kvs::Datastore;
 
 async fn setup() -> std::sync::Arc<Datastore> {
-	let ds = Datastore::builder().build_with_path("memory").await.unwrap();
-	ds.execute("DEFINE NAMESPACE tenant", &Session::owner(), None).await.unwrap();
-	ds.execute("DEFINE DATABASE app", &Session::owner().with_ns("tenant"), None).await.unwrap();
+	let ds = Datastore::builder()
+		.build_with_path("memory")
+		.await
+		.expect("quota fixture operation must succeed");
+	ds.execute("DEFINE NAMESPACE tenant", &Session::owner(), None)
+		.await
+		.expect("quota fixture operation must succeed");
+	ds.execute("DEFINE DATABASE app", &Session::owner().with_ns("tenant"), None)
+		.await
+		.expect("quota fixture operation must succeed");
 	ds
 }
 
 async fn statement_error(ds: &Datastore, sql: &str, session: &Session) -> String {
 	match ds.execute(sql, session, None).await {
-		Ok(mut responses) => responses.remove(responses.len() - 1).result.unwrap_err().to_string(),
+		Ok(mut responses) => responses
+			.remove(responses.len() - 1)
+			.result
+			.expect_err("quota fixture operation must fail")
+			.to_string(),
 		Err(error) => error.to_string(),
 	}
 }
 
 async fn record_count(ds: &Datastore, table: &str) -> u64 {
-	let tx = ds.transaction(TransactionType::Read).await.unwrap();
-	let db = tx.get_db_by_name("tenant", "app", None).await.unwrap().unwrap();
-	let count =
-		tx.quota_usage(db.namespace_id, db.database_id).record_count(&table.into()).await.unwrap();
-	tx.cancel().await.unwrap();
+	let tx =
+		ds.transaction(TransactionType::Read).await.expect("quota fixture operation must succeed");
+	let db = tx
+		.get_db_by_name("tenant", "app", None)
+		.await
+		.expect("quota fixture operation must succeed")
+		.expect("quota fixture operation must succeed");
+	let count = tx
+		.quota_usage(db.namespace_id, db.database_id)
+		.record_count(&table.into())
+		.await
+		.expect("quota fixture operation must succeed");
+	tx.cancel().await.expect("quota fixture operation must succeed");
 	count
 }
 
 async fn physical_record_count(ds: &Datastore, table: &str, session: &Session) -> i64 {
 	let sql = format!("SELECT count() FROM {table} GROUP ALL");
-	let mut responses = ds.execute(&sql, session, None).await.unwrap();
-	let surrealdb_types::Value::Array(rows) = responses.remove(0).result.unwrap() else {
+	let mut responses =
+		ds.execute(&sql, session, None).await.expect("quota fixture operation must succeed");
+	let surrealdb_types::Value::Array(rows) =
+		responses.remove(0).result.expect("quota fixture operation must succeed")
+	else {
 		panic!("count query did not return an array");
 	};
 	let Some(surrealdb_types::Value::Object(row)) = rows.first() else {
@@ -44,7 +67,7 @@ async fn physical_record_count(ds: &Datastore, table: &str, session: &Session) -
 	let Some(surrealdb_types::Value::Number(count)) = row.get("count") else {
 		panic!("count query did not return a numeric count");
 	};
-	count.to_int().unwrap()
+	count.to_int().expect("quota fixture operation must succeed")
 }
 
 #[tokio::test]
@@ -744,7 +767,7 @@ async fn concurrent_clients_fill_exactly_the_remaining_record_slots() {
 								|| message.contains("Quota admission conflicted"),
 							"unexpected concurrent create error: {message}"
 						);
-						tokio::task::yield_now().await;
+						yield_now().await;
 					}
 				}
 			}

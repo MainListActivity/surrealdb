@@ -1,5 +1,6 @@
 use std::sync::{Arc, Mutex};
 
+use futures::future::join;
 use surrealdb_kvs::TransactionType;
 use surrealdb_types::{ToSql, Value};
 
@@ -16,12 +17,17 @@ struct CapturingQuotaObserver {
 
 impl ExecutionObserver for CapturingQuotaObserver {
 	fn on_quota_event(&self, event: &QuotaEvent) {
-		self.events.lock().unwrap().push(event.clone());
+		self.events.lock().expect("quota fixture operation must succeed").push(event.clone());
 	}
 }
 
 async fn query_value(ds: &Datastore, sql: &str, session: &Session) -> Value {
-	ds.execute(sql, session, None).await.unwrap().remove(0).result.unwrap()
+	ds.execute(sql, session, None)
+		.await
+		.expect("quota fixture operation must succeed")
+		.remove(0)
+		.result
+		.expect("quota fixture operation must succeed")
 }
 
 #[tokio::test]
@@ -225,7 +231,7 @@ async fn streaming_executor_returns_the_same_quota_structure_contract() {
 		assert!(finished, "quota stream must finish successfully");
 		value.expect("quota stream must return its structure")
 	};
-	let (result, structure) = futures::future::join(job.run, drain).await;
+	let (result, structure) = join(job.run, drain).await;
 	result.unwrap();
 	let structure: Value = structure;
 	let Value::Object(root) = structure else {

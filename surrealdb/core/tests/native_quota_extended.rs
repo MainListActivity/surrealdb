@@ -8,6 +8,7 @@ use surrealdb_core::{dbs, kvs};
 use surrealdb_datastore::key;
 use surrealdb_iam as iam;
 use surrealdb_observe as observe;
+use surrealdb_rpc::query::QueryResult as RpcQueryResult;
 
 #[path = "../src/kvs/tests/quota_info_test.rs"]
 mod info;
@@ -27,7 +28,7 @@ trait QuotaTransactionTestExt {
 		session: &dbs::Session,
 		vars: Option<surrealdb_types::Variables>,
 		transaction: std::sync::Arc<kvs::Transaction>,
-	) -> Result<Vec<surrealdb_rpc::query::QueryResult>, surrealdb_types::Error>;
+	) -> Result<Vec<RpcQueryResult>, surrealdb_types::Error>;
 }
 impl QuotaTransactionTestExt for kvs::Datastore {
 	async fn execute_with_transaction(
@@ -36,7 +37,7 @@ impl QuotaTransactionTestExt for kvs::Datastore {
 		session: &dbs::Session,
 		vars: Option<surrealdb_types::Variables>,
 		transaction: std::sync::Arc<kvs::Transaction>,
-	) -> Result<Vec<surrealdb_rpc::query::QueryResult>, surrealdb_types::Error> {
+	) -> Result<Vec<RpcQueryResult>, surrealdb_types::Error> {
 		self.run(
 			kvs::QueryRequest::new(sql, session).with_variables(vars).with_transaction(transaction),
 		)

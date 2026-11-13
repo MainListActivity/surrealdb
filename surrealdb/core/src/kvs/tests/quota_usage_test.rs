@@ -12,23 +12,39 @@ use crate::kvs::Datastore;
 
 async fn setup()
 -> (std::sync::Arc<Datastore>, crate::catalog::NamespaceId, crate::catalog::DatabaseId) {
-	let ds =
-		Datastore::builder().without_maintenance_tasks().build_with_path("memory").await.unwrap();
+	let ds = Datastore::builder()
+		.without_maintenance_tasks()
+		.build_with_path("memory")
+		.await
+		.expect("quota fixture operation must succeed");
 	let root = Session::owner();
 	let namespace_owner = Session::owner().with_ns("tenant");
-	ds.execute("DEFINE NAMESPACE tenant", &root, None).await.unwrap();
-	ds.execute("DEFINE DATABASE app", &namespace_owner, None).await.unwrap();
+	ds.execute("DEFINE NAMESPACE tenant", &root, None)
+		.await
+		.expect("quota fixture operation must succeed");
+	ds.execute("DEFINE DATABASE app", &namespace_owner, None)
+		.await
+		.expect("quota fixture operation must succeed");
 
-	let tx = ds.transaction(TransactionType::Read).await.unwrap();
-	let db = tx.get_db_by_name("tenant", "app", None).await.unwrap().unwrap();
+	let tx =
+		ds.transaction(TransactionType::Read).await.expect("quota fixture operation must succeed");
+	let db = tx
+		.get_db_by_name("tenant", "app", None)
+		.await
+		.expect("quota fixture operation must succeed")
+		.expect("quota fixture operation must succeed");
 	let ids = (db.namespace_id, db.database_id);
-	tx.cancel().await.unwrap();
+	tx.cancel().await.expect("quota fixture operation must succeed");
 	(ds, ids.0, ids.1)
 }
 
 async fn statement_error(ds: &Datastore, sql: &str, session: &Session) -> String {
 	match ds.execute(sql, session, None).await {
-		Ok(mut responses) => responses.remove(responses.len() - 1).result.unwrap_err().to_string(),
+		Ok(mut responses) => responses
+			.remove(responses.len() - 1)
+			.result
+			.expect_err("quota fixture operation must fail")
+			.to_string(),
 		Err(error) => error.to_string(),
 	}
 }
