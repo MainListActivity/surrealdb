@@ -2234,6 +2234,62 @@ jobs:
         if: always() && matrix.backend == 'tikv'
         run: bash scripts/native-quota/disposable_tikv_ci.sh stop
 
+  quota-performance-preflight:
+    name: RocksDB quota regression preflight
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: macos-15
+    timeout-minutes: 120
+    steps:
+      - name: Harden the runner
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+      - name: Checkout exact source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          save-cache: false
+      # This preflight uses the same baseline, runner and retry policy as the
+      # protected candidate gate; it is not release certification.
+      - name: Compare with release baseline
+        run: |
+          set -euo pipefail
+          benchmark=(
+            cargo bench -p surrealdb-core --bench quota --features kv-rocksdb --
+            --baseline ../../compatibility/native-quota-rocksdb-v1.json
+            --output ../../target/native-quota-benchmark.json
+          )
+          attempt=1
+          while [ "$attempt" -le 3 ]; do
+            log="$RUNNER_TEMP/native-quota-benchmark-$attempt.log"
+            set +e
+            "${benchmark[@]}" 2>&1 | tee "$log"
+            exit_code=${PIPESTATUS[0]}
+            set -e
+            if [ "$exit_code" -eq 0 ]; then
+              exit 0
+            fi
+            if ! grep -Eq 'normalized (throughput|p(95|99) latency) regressed beyond' "$log"; then
+              exit "$exit_code"
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              exit "$exit_code"
+            fi
+            attempt=$((attempt + 1))
+            echo "Retrying warmed benchmark after a throughput or latency regression (attempt $attempt/3)."
+            python3 -c 'from pathlib import Path; Path("target/native-quota-benchmark.json").unlink(missing_ok=True)'
+          done
+      - name: Upload benchmark evidence
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: native-quota-performance-preflight-${{ github.sha }}
+          path: target/native-quota-benchmark.json
+          retention-days: 90
+
   required-checks:
     name: Required checks
     runs-on: ubuntu-latest
@@ -2285,6 +2341,7 @@ jobs:
       # KVS tests
       - kvs-engines
       - quota-backend-preflight
+      - quota-performance-preflight
       # SurrealQL language tests
       - lang-tests
       - upgrade-harness
@@ -2347,6 +2404,7 @@ jobs:
             "${{ needs.sdk-engines-server.result }}"
             "${{ needs.kvs-engines.result }}"
             "${{ needs.quota-backend-preflight.result }}"
+            "${{ needs.quota-performance-preflight.result }}"
             "${{ needs.lang-tests.result }}"
             "${{ needs.upgrade-harness.result }}"
             "${{ needs.upgrade-tests.result }}"
@@ -2380,6 +2438,11 @@ jobs:
               echo "❌ mysql check did not succeed: ${{ needs.mysql.result }}"
               failed=true
             fi
+          fi
+
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ needs.quota-performance-preflight.result }}" != "success" ]]; then
+            echo "❌ Native quota performance preflight did not succeed"
+            failed=true
           fi
 
           if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ needs.quota-backend-preflight.result }}" != "success" ]]; then
