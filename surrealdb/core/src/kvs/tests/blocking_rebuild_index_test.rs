@@ -202,6 +202,9 @@ async fn assert_outlasted_rebuild_reports_its_commit(
 	ds.shutdown().await.unwrap();
 	drop(ds);
 	let ds = open_surrealkv_ds(&dir, transaction_timeout, query_timeout).await;
+	// Progress is persisted at batch commits. Keep these timeout-behaviour tests
+	// observable even when the adaptive default would scan thousands at once.
+	let _scan = crate::kvs::index::set_scan_batch(ds.id(), 128);
 	let results = run(&ds, &ses, "REBUILD INDEX ix ON t").await;
 	let [Err(err)] = results.as_slice() else {
 		panic!("the rebuild did not outlast its timeout: {results:?}");
@@ -292,6 +295,7 @@ async fn cancelling_a_blocking_rebuild_after_its_commit_leaves_its_build_running
 	let (_dir, ds, ses) = surrealkv_ds().await;
 	run_one(&ds, &ses, "DEFINE INDEX ix ON t FIELDS v").await;
 	seed_row_count(&ds, &ses, MANY_ROWS).await;
+	let _scan = crate::kvs::index::set_scan_batch(ds.id(), 128);
 	let cancel = CancelHandle::new();
 	let rebuild = {
 		let (ds, ses, cancel) = (Arc::clone(&ds), ses.clone(), cancel.clone());

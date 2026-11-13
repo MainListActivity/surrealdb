@@ -37,6 +37,8 @@ mod builder;
 mod count;
 mod doc_ids;
 mod kind;
+#[cfg(test)]
+pub(super) use kind::test_sink::set_scan_batch;
 pub(crate) mod materialise;
 mod replay;
 #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]

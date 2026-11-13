@@ -561,12 +561,12 @@ pub(super) mod test_sink {
 	}
 
 	/// Scans `node`'s builds in batches of `records` until the guard drops.
-	pub(in crate::kvs::index) fn set_scan_batch(node: uuid::Uuid, records: u32) -> ScanGuard {
+	pub(in crate::kvs) fn set_scan_batch(node: uuid::Uuid, records: u32) -> ScanGuard {
 		SCAN.lock().unwrap_or_else(|p| p.into_inner()).insert(node, records);
 		ScanGuard(node)
 	}
 
-	pub(in crate::kvs::index) struct ScanGuard(uuid::Uuid);
+	pub(in crate::kvs) struct ScanGuard(uuid::Uuid);
 
 	impl Drop for ScanGuard {
 		fn drop(&mut self) {

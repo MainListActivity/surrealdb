@@ -18,7 +18,7 @@ use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_core::kvs::tasks::{Job, Progress};
 use surrealdb_core::options::EngineOptions;
-use surrealdb_datastore::key::schema::{LiveEventWatermarkKey, LiveEventsPrefix};
+use surrealdb_datastore::key::schema::{KEYSPACE_MAP, LiveEventWatermarkKey, LiveEventsPrefix};
 use surrealdb_datastore::tx::Transaction;
 use surrealdb_datastore::{is_retryable_transaction_conflict, storage_error};
 use surrealdb_expr::val::{RecordId as StoredRecordId, TableName, Value as StoredValue};
@@ -463,8 +463,5 @@ async fn a_nonadvancing_timestamp_is_rejected_without_publishing_an_event() {
 /// datastore's complete unit-test binary into this focused regression run.
 #[test]
 fn typed_keyspace_map_matches_its_snapshot() {
-	assert_eq!(
-		surrealdb_datastore::key::schema::KEYSPACE_MAP,
-		include_str!("../../datastore/src/key/keyspace.map"),
-	);
+	assert_eq!(KEYSPACE_MAP, include_str!("../../datastore/src/key/keyspace.map"),);
 }
