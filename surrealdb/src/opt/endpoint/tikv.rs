@@ -37,3 +37,23 @@ macro_rules! endpoints {
 }
 
 endpoints!(&str, &String, String, SocketAddr);
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn typed_endpoints_preserve_the_pd_address() {
+		let addr: SocketAddr = "127.0.0.1:2379".parse().unwrap();
+		let endpoints = [
+			into_endpoint::Sealed::<TiKv>::into_endpoint("127.0.0.1:2379").unwrap(),
+			into_endpoint::Sealed::<TiKv>::into_endpoint(addr).unwrap(),
+			into_endpoint::Sealed::<TiKv>::into_endpoint((addr, Config::default())).unwrap(),
+		];
+		for endpoint in endpoints {
+			assert_eq!(endpoint.path, "tikv://127.0.0.1:2379");
+			assert_eq!(endpoint.url.scheme(), "tikv");
+			assert_eq!(endpoint.url.port(), Some(2379));
+		}
+	}
+}

@@ -271,6 +271,9 @@ impl CompatibilityManifest {
 		{
 			bail!("native quota migration manifest does not match this binary");
 		}
+		let release_version = semver::Version::parse(release)?;
+		let stable_branch =
+			format!("releases/sck-{}.{}", release_version.major, release_version.minor);
 		let supply_chain = &self.release_supply_chain;
 		if supply_chain.candidate_manifest_format != 1
 			|| supply_chain.image_repository != "ghcr.io/mainlistactivity/surrealdb-native-quota"
@@ -279,7 +282,7 @@ impl CompatibilityManifest {
 			|| supply_chain.image_repository == supply_chain.nightly_image_repository
 			|| supply_chain.image_repository.contains("surrealdb/surrealdb")
 			|| supply_chain.nightly_image_repository.contains("surrealdb/surrealdb")
-			|| supply_chain.stable_branch != "releases/sck-3.3"
+			|| supply_chain.stable_branch != stable_branch
 			|| supply_chain.production_reference != "digest-only"
 			|| supply_chain.promotion_environments != ["canary", "staging", "production"]
 			|| supply_chain.downstream_repository != "MainListActivity/surreal_ck"
@@ -803,7 +806,7 @@ mod tests {
 						assert_redacted(value, forbidden);
 					}
 				}
-				_ => {}
+				Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
 			}
 		}
 		assert_redacted(&value, &forbidden);

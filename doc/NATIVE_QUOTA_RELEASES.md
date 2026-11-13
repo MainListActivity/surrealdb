@@ -47,8 +47,8 @@ has a successful upstream `CI` run, or after a manual request that proves the
 same fact through the Actions API. It then runs:
 
 1. compatibility, capability, format, and release-contract tests;
-2. memory and RocksDB hard-quota contract suites, including RocksDB
-   restart/fault certification;
+2. memory, RocksDB, and disposable three-node TiKV hard-quota contract suites,
+   including RocksDB restart/fault certification;
 3. the fixed-workload RocksDB regression benchmark;
 4. one amd64 and one arm64 CLI build for the same release and Git SHA;
 5. one multi-architecture OCI build from those CLI artifacts;
@@ -65,6 +65,17 @@ The candidate manifest proves that CLI artifacts, image labels, the live
 capability document, compatibility manifest, fork release, and source all use
 the same full Git SHA and release. Deploy the `repository@sha256:...` reference
 from this manifest, never a tag.
+
+After production acceptance, the stable GitHub Release is assembled as a draft
+from the same candidate: it includes the two CLI archives, checksum and Sigstore
+sidecars, compatibility/capability documents, supply-chain evidence and signed
+promotion receipts. Before publishing, the workflow re-downloads the draft assets
+by authenticated asset ID, verifies their bytes, signed-candidate hashes and CLI
+signatures, checks the ELF architecture and runs each CLI version (arm64 under
+QEMU) against the release and source SHA. It publishes the verified draft as the
+latest stable release, then downloads and verifies the published assets again.
+An interrupted draft or existing release with missing or changed assets fails
+closed; it is never silently repaired by overwriting an immutable artifact.
 
 ## Promotion
 

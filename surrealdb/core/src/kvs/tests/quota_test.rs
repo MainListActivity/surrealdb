@@ -1,40 +1,65 @@
 use std::sync::Arc;
 
+use surrealdb_kvs::TransactionType;
+
 use crate::catalog::providers::DatabaseProvider;
 use crate::dbs::Session;
 use crate::iam::{Auth, Level, Role};
-use crate::key::database::qg::Qg;
-use crate::key::database::qt::Qt;
-use crate::kvs::{Datastore, LockType, TransactionType};
+use crate::key::schema::{QuotaGenerationKey, QuotaPolicyKey};
+use crate::kvs::Datastore;
 
-async fn setup() -> Datastore {
-	let ds = Datastore::new("memory").await.unwrap();
+async fn setup() -> std::sync::Arc<Datastore> {
+	let ds = Datastore::builder()
+		.build_with_path("memory")
+		.await
+		.expect("quota fixture operation must succeed");
 	let root = Session::owner();
 	let ns = Session::owner().with_ns("tenant");
-	ds.execute("DEFINE NAMESPACE tenant", &root, None).await.unwrap();
-	ds.execute("DEFINE DATABASE app", &ns, None).await.unwrap();
+	ds.execute("DEFINE NAMESPACE tenant", &root, None)
+		.await
+		.expect("quota fixture operation must succeed");
+	ds.execute("DEFINE DATABASE app", &ns, None)
+		.await
+		.expect("quota fixture operation must succeed");
 	ds
 }
 
 async fn generation(ds: &Datastore) -> Option<u64> {
-	let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await.unwrap();
-	let db = tx.get_db_by_name("tenant", "app", None).await.unwrap().unwrap();
-	let generation =
-		tx.get_db_quota(db.namespace_id, db.database_id, None).await.unwrap().map(|x| x.generation);
-	tx.cancel().await.unwrap();
+	let tx =
+		ds.transaction(TransactionType::Read).await.expect("quota fixture operation must succeed");
+	let db = tx
+		.get_db_by_name("tenant", "app", None)
+		.await
+		.expect("quota fixture operation must succeed")
+		.expect("quota fixture operation must succeed");
+	let generation = tx
+		.get_db_quota(db.namespace_id, db.database_id, None)
+		.await
+		.expect("quota fixture operation must succeed")
+		.map(|x| x.generation);
+	tx.cancel().await.expect("quota fixture operation must succeed");
 	generation
 }
 
 async fn statement_error(ds: &Datastore, sql: &str, session: &Session) -> String {
 	match ds.execute(sql, session, None).await {
-		Ok(mut responses) => responses.remove(responses.len() - 1).result.unwrap_err().to_string(),
+		Ok(mut responses) => responses
+			.remove(responses.len() - 1)
+			.result
+			.expect_err("quota fixture operation must fail")
+			.to_string(),
 		Err(error) => error.to_string(),
 	}
 }
 
 async fn import_error(ds: &Datastore, sql: &str, session: &Session) -> String {
-	let mut responses = ds.import(sql, session).await.unwrap();
-	responses.remove(responses.len() - 1).result.unwrap_err().to_string()
+	let mut responses =
+		ds.import(sql, session).await.expect("quota fixture operation must succeed");
+	responses
+		.remove(responses.len() - 1)
+		.result
+		.expect_err("quota fixture operation must fail")
+		.to_string()
 }
 
 #[tokio::test]
@@ -168,7 +193,7 @@ async fn semantic_noop_at_max_generation_does_not_overflow() {
 	.result
 	.unwrap();
 
-	let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
+	let tx = ds.transaction(TransactionType::Write).await.unwrap();
 	let db = tx.get_db_by_name("tenant", "app", None).await.unwrap().unwrap();
 	let mut policy = tx
 		.get_db_quota(db.namespace_id, db.database_id, None)
@@ -178,8 +203,24 @@ async fn semantic_noop_at_max_generation_does_not_overflow() {
 		.as_ref()
 		.clone();
 	policy.generation = u64::MAX;
-	tx.set(&Qt::new(db.namespace_id, db.database_id), &policy).await.unwrap();
-	tx.set(&Qg::new(db.namespace_id, db.database_id), &u64::MAX).await.unwrap();
+	tx.set_key(
+		&QuotaPolicyKey {
+			ns: db.namespace_id,
+			db: db.database_id,
+		},
+		&policy,
+	)
+	.await
+	.unwrap();
+	tx.set_key(
+		&QuotaGenerationKey {
+			ns: db.namespace_id,
+			db: db.database_id,
+		},
+		&u64::MAX,
+	)
+	.await
+	.unwrap();
 	tx.commit().await.unwrap();
 
 	ds.execute(

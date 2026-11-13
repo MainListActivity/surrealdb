@@ -1,11 +1,14 @@
 use std::sync::Arc;
 
+use surrealdb_kvs::TransactionType;
+
+use super::QuotaTransactionTestExt;
 use crate::catalog::providers::{DatabaseProvider, TableProvider};
 use crate::dbs::Session;
-use crate::kvs::{Datastore, LockType, TransactionType};
+use crate::kvs::Datastore;
 
-async fn setup() -> Datastore {
-	let ds = Datastore::new("memory").await.unwrap();
+async fn setup() -> std::sync::Arc<Datastore> {
+	let ds = Datastore::builder().build_with_path("memory").await.unwrap();
 	ds.execute("DEFINE NAMESPACE tenant", &Session::owner(), None).await.unwrap();
 	ds.execute("DEFINE DATABASE app", &Session::owner().with_ns("tenant"), None).await.unwrap();
 	ds
@@ -19,7 +22,7 @@ async fn statement_error(ds: &Datastore, sql: &str, session: &Session) -> String
 }
 
 async fn table_bucket_count(ds: &Datastore, generation: u64, rule: &str) -> u64 {
-	let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await.unwrap();
+	let tx = ds.transaction(TransactionType::Read).await.unwrap();
 	let db = tx.get_db_by_name("tenant", "app", None).await.unwrap().unwrap();
 	let count = tx
 		.quota_usage(db.namespace_id, db.database_id)
@@ -77,7 +80,7 @@ async fn table_exact_and_regex_rules_consume_every_matching_bucket() {
 }
 
 async fn field_count(ds: &Datastore, table: &str) -> u64 {
-	let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await.unwrap();
+	let tx = ds.transaction(TransactionType::Read).await.unwrap();
 	let db = tx.get_db_by_name("tenant", "app", None).await.unwrap().unwrap();
 	let count =
 		tx.quota_usage(db.namespace_id, db.database_id).field_count(&table.into()).await.unwrap();
@@ -85,8 +88,22 @@ async fn field_count(ds: &Datastore, table: &str) -> u64 {
 	count
 }
 
+#[tokio::test]
+async fn changing_table_kind_updates_endpoint_field_usage() {
+	let ds = setup().await;
+	let owner = Session::owner().with_ns("tenant").with_db("app");
+	for (sql, expected) in [
+		("DEFINE TABLE edge TYPE RELATION", 0),
+		("ALTER TABLE edge TYPE ANY", 2),
+		("ALTER TABLE edge TYPE RELATION", 0),
+	] {
+		ds.execute(sql, &owner, None).await.unwrap().remove(0).result.unwrap();
+		assert_eq!(field_count(&ds, "edge").await, expected, "{sql}");
+	}
+}
+
 async fn record_count(ds: &Datastore, table: &str) -> u64 {
-	let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await.unwrap();
+	let tx = ds.transaction(TransactionType::Read).await.unwrap();
 	let db = tx.get_db_by_name("tenant", "app", None).await.unwrap().unwrap();
 	let count =
 		tx.quota_usage(db.namespace_id, db.database_id).record_count(&table.into()).await.unwrap();
@@ -95,7 +112,7 @@ async fn record_count(ds: &Datastore, table: &str) -> u64 {
 }
 
 async fn seed_record_count(ds: &Datastore, table: &str, count: u64) {
-	let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
+	let tx = ds.transaction(TransactionType::Write).await.unwrap();
 	let db = tx.get_db_by_name("tenant", "app", None).await.unwrap().unwrap();
 	tx.quota_usage(db.namespace_id, db.database_id)
 		.increment_record_count(&table.into(), count)
@@ -128,6 +145,7 @@ async fn field_exact_overrides_regex_and_regex_uses_smallest_finite_limit() {
 
 	ds.execute(
 		"DEFINE FIELD name ON ent_user TYPE string; \
+		 DEFINE FIELD profile ON ent_user TYPE object; \
 		 DEFINE FIELD profile.name ON ent_user TYPE string",
 		&database_owner,
 		None,
@@ -148,7 +166,7 @@ async fn field_exact_overrides_regex_and_regex_uses_smallest_finite_limit() {
 	let error =
 		statement_error(&ds, "DEFINE FIELD second ON ent_order TYPE string", &database_owner).await;
 	assert!(error.contains("order_fields"), "{error}");
-	assert_eq!(field_count(&ds, "ent_user").await, 2);
+	assert_eq!(field_count(&ds, "ent_user").await, 3);
 	assert_eq!(field_count(&ds, "ent_order").await, 1);
 }
 
@@ -282,7 +300,7 @@ async fn quota_intents_follow_transaction_savepoint_rollback() {
 	.result
 	.unwrap();
 
-	let tx = Arc::new(ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap());
+	let tx = Arc::new(ds.transaction(TransactionType::Write).await.unwrap());
 	tx.new_save_point().await.unwrap();
 	ds.execute_with_transaction("DEFINE TABLE rolled_back", &database_owner, None, Arc::clone(&tx))
 		.await
@@ -451,8 +469,7 @@ async fn in_flight_catalog_write_conflicts_with_policy_generation_switch() {
 	.result
 	.unwrap();
 
-	let writer =
-		Arc::new(ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap());
+	let writer = Arc::new(ds.transaction(TransactionType::Write).await.unwrap());
 	ds.execute_with_transaction(
 		"DEFINE TABLE ent_late",
 		&database_owner,
@@ -478,8 +495,62 @@ async fn in_flight_catalog_write_conflicts_with_policy_generation_switch() {
 	.unwrap();
 	assert!(writer.commit().await.is_err());
 
-	let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await.unwrap();
+	let tx = ds.transaction(TransactionType::Read).await.unwrap();
 	assert!(tx.get_tb_by_name("tenant", "app", &"ent_late".into(), None).await.unwrap().is_none());
 	tx.cancel().await.unwrap();
 	assert_eq!(table_bucket_count(&ds, 2, "ent_tables").await, 0);
+}
+
+/// Provider callers bypass SQL DDL. They must still meter one catalog entry,
+/// rather than each call, and keep ledger changes in the same transaction.
+#[tokio::test]
+async fn direct_catalog_providers_meter_idempotence_and_savepoint_rollback() {
+	let ds = setup().await;
+	let owner = Session::owner().with_ns("tenant").with_db("app");
+	for response in ds
+		.execute(
+			"DEFINE TABLE ent_provider; DEFINE FIELD value ON ent_provider TYPE int; \
+         DEFINE QUOTA ON DATABASE app \
+         RULE tables FOR TABLE MATCH REGEX /^ent_/ LIMIT 1 \
+         RULE fields FOR FIELD MATCH EXACT ent_provider LIMIT 1",
+			&owner,
+			None,
+		)
+		.await
+		.unwrap()
+	{
+		response.result.unwrap();
+	}
+	let table = surrealdb_strand::TableName::from("ent_provider");
+	let tx = ds.transaction(TransactionType::Write).await.unwrap();
+	let db = tx.get_db_by_name("tenant", "app", None).await.unwrap().unwrap();
+	let (ns, db) = (db.namespace_id, db.database_id);
+	let definition = tx.get_tb(ns, db, &table, None).await.unwrap().unwrap();
+	let field = tx.get_tb_field(ns, db, &table, "value", None).await.unwrap().unwrap();
+	assert_eq!(tx.quota_usage(ns, db).table_bucket_count(1, "tables").await.unwrap(), 1);
+	assert_eq!(tx.quota_usage(ns, db).field_count(&table).await.unwrap(), 1);
+	tx.put_tb("tenant", "app", &definition).await.unwrap();
+	tx.put_tb_field(ns, db, &table, &field).await.unwrap();
+	assert_eq!(tx.quota_usage(ns, db).table_bucket_count(1, "tables").await.unwrap(), 1);
+	assert_eq!(tx.quota_usage(ns, db).field_count(&table).await.unwrap(), 1);
+	tx.new_save_point().await.unwrap();
+	tx.del_tb_field(ns, db, &table, "value").await.unwrap();
+	tx.del_tb_field(ns, db, &table, "value").await.unwrap();
+	assert_eq!(tx.quota_usage(ns, db).field_count(&table).await.unwrap(), 0);
+	tx.put_tb_field(ns, db, &table, &field).await.unwrap();
+	tx.put_tb_field(ns, db, &table, &field).await.unwrap();
+	assert_eq!(tx.quota_usage(ns, db).field_count(&table).await.unwrap(), 1);
+	tx.del_tb("tenant", "app", &table).await.unwrap();
+	assert_eq!(tx.quota_usage(ns, db).table_bucket_count(1, "tables").await.unwrap(), 0);
+	assert_eq!(tx.quota_usage(ns, db).field_count(&table).await.unwrap(), 0);
+	tx.rollback_to_save_point().await.unwrap();
+	assert!(tx.get_tb(ns, db, &table, None).await.unwrap().is_some());
+	assert!(tx.get_tb_field(ns, db, &table, "value", None).await.unwrap().is_some());
+	assert_eq!(tx.quota_usage(ns, db).table_bucket_count(1, "tables").await.unwrap(), 1);
+	assert_eq!(tx.quota_usage(ns, db).field_count(&table).await.unwrap(), 1);
+	tx.commit().await.unwrap();
+	let tx = ds.transaction(TransactionType::Read).await.unwrap();
+	assert_eq!(tx.quota_usage(ns, db).table_bucket_count(1, "tables").await.unwrap(), 1);
+	assert_eq!(tx.quota_usage(ns, db).field_count(&table).await.unwrap(), 1);
+	tx.cancel().await.unwrap();
 }

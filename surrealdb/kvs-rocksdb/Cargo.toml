@@ -1,0 +1,43 @@
+[package]
+name = "surrealdb-kvs-rocksdb"
+publish = false
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license-file = "LICENSE"
+description.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+affinitypool.workspace = true
+anyhow.workspace = true
+bytes.workspace = true
+futures.workspace = true
+num_cpus.workspace = true
+common = { workspace = true, features = ["sys"] }
+parking_lot.workspace = true
+rocksdb = { version = "=0.24.0-surreal.5", package = "surrealdb-rocksdb", features = ["lz4", "snappy"] }
+surrealdb-cnf.workspace = true
+surrealdb-kvs.workspace = true
+surrealdb-kvs-any.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["sync", "rt-multi-thread", "time"] }
+tracing.workspace = true
+web-time.workspace = true
+
+[dev-dependencies]
+surrealdb-kvs-test.workspace = true
+temp-dir.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tokio-util.workspace = true
+
+[lints]
+workspace = true
+
+[[test]]
+name = "kvs"
+path = "tests/kvs.rs"
+harness = false

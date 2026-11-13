@@ -1,0 +1,43 @@
+[package]
+name = "surrealdb-kvs-tikv"
+publish = false
+readme = "README.md"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license-file = "LICENSE"
+description.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+chrono = { workspace = true }
+surrealdb-cnf = { workspace = true }
+surrealdb-kvs = { workspace = true }
+surrealdb-kvs-any = { workspace = true }
+tikv = { version = "0.5.0", default-features = false, package = "surrealdb-tikv-client" }
+tokio = { workspace = true, features = ["sync"] }
+tracing = { workspace = true }
+
+[dev-dependencies]
+surrealdb-kvs-test = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tokio-util = { workspace = true }
+# Constructs the `tonic::Status` values that `kvs_error`'s gRPC arm classifies.
+# Test-only, so the shipped dependency graph is unchanged.
+tonic.workspace = true
+
+[[test]]
+name = "kvs"
+path = "tests/kvs.rs"
+harness = false
+
+[[test]]
+name = "ops"
+path = "tests/ops.rs"
+
+[lints]
+workspace = true
+

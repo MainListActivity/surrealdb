@@ -1,39 +1,64 @@
 use std::sync::Arc;
 
+use surrealdb_kvs::TransactionType;
 use tokio::sync::Barrier;
+use tokio::task::yield_now;
 
+use super::QuotaTransactionTestExt;
+use crate::catalog::Error;
 use crate::catalog::providers::{DatabaseProvider, TableProvider};
 use crate::dbs::Session;
-use crate::err::Error;
-use crate::kvs::{Datastore, LockType, TransactionType};
+use crate::kvs::Datastore;
 
-async fn setup() -> Datastore {
-	let ds = Datastore::new("memory").await.unwrap();
-	ds.execute("DEFINE NAMESPACE tenant", &Session::owner(), None).await.unwrap();
-	ds.execute("DEFINE DATABASE app", &Session::owner().with_ns("tenant"), None).await.unwrap();
+async fn setup() -> std::sync::Arc<Datastore> {
+	let ds = Datastore::builder()
+		.build_with_path("memory")
+		.await
+		.expect("quota fixture operation must succeed");
+	ds.execute("DEFINE NAMESPACE tenant", &Session::owner(), None)
+		.await
+		.expect("quota fixture operation must succeed");
+	ds.execute("DEFINE DATABASE app", &Session::owner().with_ns("tenant"), None)
+		.await
+		.expect("quota fixture operation must succeed");
 	ds
 }
 
 async fn statement_error(ds: &Datastore, sql: &str, session: &Session) -> String {
 	match ds.execute(sql, session, None).await {
-		Ok(mut responses) => responses.remove(responses.len() - 1).result.unwrap_err().to_string(),
+		Ok(mut responses) => responses
+			.remove(responses.len() - 1)
+			.result
+			.expect_err("quota fixture operation must fail")
+			.to_string(),
 		Err(error) => error.to_string(),
 	}
 }
 
 async fn record_count(ds: &Datastore, table: &str) -> u64 {
-	let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await.unwrap();
-	let db = tx.get_db_by_name("tenant", "app", None).await.unwrap().unwrap();
-	let count =
-		tx.quota_usage(db.namespace_id, db.database_id).record_count(&table.into()).await.unwrap();
-	tx.cancel().await.unwrap();
+	let tx =
+		ds.transaction(TransactionType::Read).await.expect("quota fixture operation must succeed");
+	let db = tx
+		.get_db_by_name("tenant", "app", None)
+		.await
+		.expect("quota fixture operation must succeed")
+		.expect("quota fixture operation must succeed");
+	let count = tx
+		.quota_usage(db.namespace_id, db.database_id)
+		.record_count(&table.into())
+		.await
+		.expect("quota fixture operation must succeed");
+	tx.cancel().await.expect("quota fixture operation must succeed");
 	count
 }
 
 async fn physical_record_count(ds: &Datastore, table: &str, session: &Session) -> i64 {
 	let sql = format!("SELECT count() FROM {table} GROUP ALL");
-	let mut responses = ds.execute(&sql, session, None).await.unwrap();
-	let surrealdb_types::Value::Array(rows) = responses.remove(0).result.unwrap() else {
+	let mut responses =
+		ds.execute(&sql, session, None).await.expect("quota fixture operation must succeed");
+	let surrealdb_types::Value::Array(rows) =
+		responses.remove(0).result.expect("quota fixture operation must succeed")
+	else {
 		panic!("count query did not return an array");
 	};
 	let Some(surrealdb_types::Value::Object(row)) = rows.first() else {
@@ -42,7 +67,7 @@ async fn physical_record_count(ds: &Datastore, table: &str, session: &Session) -
 	let Some(surrealdb_types::Value::Number(count)) = row.get("count") else {
 		panic!("count query did not return a numeric count");
 	};
-	count.to_int().unwrap()
+	count.to_int().expect("quota fixture operation must succeed")
 }
 
 #[tokio::test]
@@ -422,7 +447,7 @@ async fn record_quota_intents_follow_savepoint_rollback_and_cancel() {
 		.result
 		.unwrap();
 
-	let tx = Arc::new(ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap());
+	let tx = Arc::new(ds.transaction(TransactionType::Write).await.unwrap());
 	tx.new_save_point().await.unwrap();
 	ds.execute_with_transaction(
 		"CREATE ent_user:rolled_back",
@@ -439,8 +464,7 @@ async fn record_quota_intents_follow_savepoint_rollback_and_cancel() {
 	tx.commit().await.unwrap();
 	assert_eq!(record_count(&ds, "ent_user").await, 0);
 
-	let cancelled =
-		Arc::new(ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap());
+	let cancelled = Arc::new(ds.transaction(TransactionType::Write).await.unwrap());
 	ds.execute_with_transaction(
 		"CREATE ent_user:cancelled",
 		&database_owner,
@@ -483,7 +507,7 @@ async fn commit_aggregates_record_violations_across_tables() {
 	.result
 	.unwrap();
 
-	let tx = Arc::new(ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap());
+	let tx = Arc::new(ds.transaction(TransactionType::Write).await.unwrap());
 	for sql in ["CREATE ent_a:one", "CREATE ent_b:one"] {
 		ds.execute_with_transaction(sql, &database_owner, None, Arc::clone(&tx))
 			.await
@@ -520,7 +544,7 @@ async fn aggregated_quota_violations_are_deterministic_and_capped() {
 	}
 	ds.execute(&policy, &namespace_owner, None).await.unwrap().remove(0).result.unwrap();
 
-	let tx = Arc::new(ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap());
+	let tx = Arc::new(ds.transaction(TransactionType::Write).await.unwrap());
 	for response in ds
 		.execute_with_transaction(&mutations, &database_owner, None, Arc::clone(&tx))
 		.await
@@ -669,8 +693,7 @@ async fn in_flight_record_write_conflicts_with_policy_generation_switch() {
 		.result
 		.unwrap();
 
-	let writer =
-		Arc::new(ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap());
+	let writer = Arc::new(ds.transaction(TransactionType::Write).await.unwrap());
 	ds.execute_with_transaction("CREATE ent_user:late", &database_owner, None, Arc::clone(&writer))
 		.await
 		.unwrap()
@@ -696,7 +719,7 @@ async fn in_flight_record_write_conflicts_with_policy_generation_switch() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn concurrent_clients_fill_exactly_the_remaining_record_slots() {
-	let ds = Arc::new(setup().await);
+	let ds = setup().await;
 	let namespace_owner = Session::owner().with_ns("tenant");
 	let database_owner = Session::owner().with_ns("tenant").with_db("app");
 	ds.execute(
@@ -744,7 +767,7 @@ async fn concurrent_clients_fill_exactly_the_remaining_record_slots() {
 								|| message.contains("Quota admission conflicted"),
 							"unexpected concurrent create error: {message}"
 						);
-						tokio::task::yield_now().await;
+						yield_now().await;
 					}
 				}
 			}
@@ -814,7 +837,7 @@ async fn implicit_table_and_record_violations_roll_back_together() {
 	.result
 	.unwrap();
 
-	let tx = Arc::new(ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap());
+	let tx = Arc::new(ds.transaction(TransactionType::Write).await.unwrap());
 	ds.execute_with_transaction("CREATE ent_forbidden:one", &database_owner, None, Arc::clone(&tx))
 		.await
 		.unwrap()
@@ -830,7 +853,7 @@ async fn implicit_table_and_record_violations_roll_back_together() {
 		["table", "record"]
 	);
 
-	let read = ds.transaction(TransactionType::Read, LockType::Optimistic).await.unwrap();
+	let read = ds.transaction(TransactionType::Read).await.unwrap();
 	assert!(
 		read.get_tb_by_name("tenant", "app", &"ent_forbidden".into(), None)
 			.await

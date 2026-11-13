@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use surrealdb_core::CommunityComposer;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
-use surrealdb_core::observe::{ExecutionObserver, Outcome, TransactionEvent};
+use surrealdb_observe::{ExecutionObserver, Outcome, TransactionEvent};
 use temp_dir::TempDir;
 
 const MANIFEST: &str = include_str!("../../../compatibility/native-quota-v1.json");
@@ -132,7 +132,7 @@ async fn execute(ds: &Datastore, sql: &str, session: &Session) {
 async fn setup(
 	workload: Workload,
 	observer: Arc<MetricsObserver>,
-) -> (Datastore, TempDir, Session) {
+) -> (Arc<Datastore>, TempDir, Session) {
 	let directory = TempDir::new().unwrap();
 	let path = format!("rocksdb:{}", directory.path().to_string_lossy());
 	let ds = Datastore::builder()
