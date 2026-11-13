@@ -1007,8 +1007,13 @@ mod pg_integration {
 		}
 		let null = client.query("SELECT nothing FROM person WHERE name = 'Tobie'", &[]).await?;
 		assert_eq!(null[0].try_get::<_, Option<String>>(0)?, None);
-		let grid = client.query("SELECT grid FROM person WHERE name = 'Grid'", &[]).await?;
-		assert_eq!(grid[0].try_get::<_, String>(0)?, "[[1,2],[3,4]]");
+		let grid_sql = "SELECT grid FROM person WHERE name = 'Grid'";
+		let grid_simple = rows(client.simple_query(grid_sql).await?);
+		assert_eq!(grid_simple.len(), 1);
+		assert_eq!(grid_simple[0].get(0), Some("{{1,2},{3,4}}"));
+		let grid = client.query(grid_sql, &[]).await?;
+		assert_eq!(grid.len(), 1);
+		assert_eq!(grid[0].try_get::<_, String>(0)?, "{{1,2},{3,4}}");
 		// A named column and the same field under `SELECT *` carry one text.
 		let star = rows(client.simple_query("SELECT * FROM person WHERE name = 'Tobie'").await?);
 		assert_eq!(star.len(), 1);
