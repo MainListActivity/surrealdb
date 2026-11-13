@@ -25,21 +25,23 @@ async fn synthetic_datastore(previous_fork: bool) -> std::sync::Arc<Datastore> {
 	} else {
 		Datastore::builder().without_maintenance_tasks()
 	};
-	let ds = builder.build_with_path("memory").await.unwrap();
+	let ds = builder.build_with_path("memory").await.expect("create in-memory migration fixture");
 	if previous_fork {
-		let tx = ds.transaction(TransactionType::Write).await.unwrap();
+		let tx = ds.transaction(TransactionType::Write).await.expect("open fixture transaction");
 		let mut marker = ForkStorageFormat::current();
 		marker.upstream_storage_major = 3;
-		marker.minimum_compatible_fork_release = "3.3.0-native-quota.1".to_owned();
-		tx.set_key(&VersionKey {}, &MajorVersion::from(0x8003)).await.unwrap();
-		tx.set_key(&ForkStorageKey {}, &marker).await.unwrap();
-		tx.commit().await.unwrap();
+		"3.3.0-native-quota.1".clone_into(&mut marker.minimum_compatible_fork_release);
+		tx.set_key(&VersionKey {}, &MajorVersion::from(0x8003)).await.expect("set legacy version");
+		tx.set_key(&ForkStorageKey {}, &marker).await.expect("set legacy fork marker");
+		tx.commit().await.expect("commit legacy fork marker");
 	}
 	let root = Session::owner();
 	let namespace_owner = Session::owner().with_ns("tenant");
 	let database_owner = Session::owner().with_ns("tenant").with_db("app");
-	ds.execute("DEFINE NAMESPACE tenant", &root, None).await.unwrap();
-	ds.execute("DEFINE DATABASE app", &namespace_owner, None).await.unwrap();
+	ds.execute("DEFINE NAMESPACE tenant", &root, None).await.expect("define fixture namespace");
+	ds.execute("DEFINE DATABASE app", &namespace_owner, None)
+		.await
+		.expect("define fixture database");
 	ds.execute(
 		"
 		DEFINE TABLE ent_user SCHEMAFULL;
@@ -51,26 +53,32 @@ async fn synthetic_datastore(previous_fork: bool) -> std::sync::Arc<Datastore> {
 		None,
 	)
 	.await
-	.unwrap()
+	.expect("execute fixture setup")
 	.into_iter()
 	.for_each(|result| {
-		result.result.unwrap();
+		result.result.expect("complete fixture setup statement");
 	});
 
 	if previous_fork {
 		return ds;
 	}
-	let tx = ds.transaction(TransactionType::Write).await.unwrap();
-	let db = tx.get_db_by_name("tenant", "app", None).await.unwrap().unwrap();
+	let tx = ds.transaction(TransactionType::Write).await.expect("open fixture transaction");
+	let db = tx
+		.get_db_by_name("tenant", "app", None)
+		.await
+		.expect("read fixture database")
+		.expect("fixture database exists");
 	tx.del_key(&QuotaUsageMetaKey {
 		ns: db.namespace_id,
 		db: db.database_id,
 	})
 	.await
-	.unwrap();
-	tx.del_key(&ForkStorageKey {}).await.unwrap();
-	tx.set_key(&VersionKey {}, &MajorVersion::upstream_latest()).await.unwrap();
-	tx.commit().await.unwrap();
+	.expect("remove fixture quota metadata");
+	tx.del_key(&ForkStorageKey {}).await.expect("remove fixture fork marker");
+	tx.set_key(&VersionKey {}, &MajorVersion::upstream_latest())
+		.await
+		.expect("set fixture version");
+	tx.commit().await.expect("commit legacy fixture");
 	ds
 }
 
