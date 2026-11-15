@@ -1715,7 +1715,6 @@ fn fill_vals_inner<D: rocksdb::DBAccess>(
 /// worker against being pinned by both the skip walk and the batch fill.
 /// After the first batch, `state.skip` is 0 and subsequent batches use
 /// only `limit`.
-
 macro_rules! refresh_after_rollback {
 	($name:ident, $state:ty) => {
 		async fn $name(tx: &Transaction, state: &mut $state) -> Result<()> {
@@ -2034,6 +2033,7 @@ impl Transactable for Transaction {
 	}
 
 	/// Commit a transaction.
+	#[allow(clippy::wildcard_enum_match_arm)]
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))]
 	fn commit(&self) -> BoxFut<'_, Result<()>> {
 		Box::pin(async move {

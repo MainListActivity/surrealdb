@@ -123,9 +123,21 @@ async fn query(stream: &mut TcpStream, sql: &str) -> Result<Vec<Option<String>>,
 	}
 }
 
-/// The one number `sql` answers.
+/// The one number `sql` answers. The quota ledger serializes commits to one
+/// database on shared keys, so a draw can legitimately conflict with another
+/// connection's insert; the conflicted commit applied nothing and the insert
+/// is retried.
 async fn number(stream: &mut TcpStream, sql: &str) -> i64 {
-	let rows = query(stream, sql).await.unwrap_or_else(|e| panic!("{sql}: {e}"));
+	let mut attempt = 0;
+	let rows = loop {
+		match query(stream, sql).await {
+			Err(e) if e.contains("conflict") && attempt < 100 => {
+				attempt += 1;
+				continue;
+			}
+			other => break other.unwrap_or_else(|e| panic!("{sql}: {e}")),
+		}
+	};
 	let [Some(cell)] = rows.as_slice() else {
 		panic!("{sql}: expected one number: {rows:?}");
 	};

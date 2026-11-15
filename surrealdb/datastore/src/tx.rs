@@ -7101,34 +7101,42 @@ impl Transaction {
 			&& DatabaseKey::decode_key(key).is_ok()
 		{
 			Box::pin(self.ensure_no_native_quota_migration()).await?;
-			let old = match prior {
-				Some(old) => {
-					old.map(|bytes| DatabaseDefinition::kv_decode_value(bytes, ())).transpose()?
-				}
-				None => self
-					.tr
-					.get(key.as_borrowed(), None)
-					.await?
-					.map(|bytes| DatabaseDefinition::kv_decode_value(&bytes, ()))
-					.transpose()?,
+			let stored = match prior {
+				Some(old) => old.map(|bytes| bytes.to_vec()),
+				None => self.tr.get(key.as_borrowed(), None).await?,
 			};
+			// A definition a newer release wrote is one this build cannot
+			// classify or compare; the write passes the quota guard the way a
+			// walk passes the entry.
+			let old = match stored
+				.map(|bytes| DatabaseDefinition::kv_decode_value(&bytes, ()))
+				.transpose()
+			{
+				Ok(old) => old,
+				Err(e) if refused_by_release(&e) => return Ok(None),
+				Err(e) => return Err(e),
+			};
+			let new =
+				match val.map(|bytes| DatabaseDefinition::kv_decode_value(bytes, ())).transpose() {
+					Ok(new) => new,
+					Err(e) if refused_by_release(&e) => return Ok(None),
+					Err(e) => return Err(e),
+				};
 			if let Some(old) = old {
 				Box::pin(
 					self.quota_usage(old.namespace_id, old.database_id)
 						.ensure_writable_for_update(),
 				)
 				.await?;
-				if let Some(bytes) = val {
-					let new = DatabaseDefinition::kv_decode_value(bytes, ())?;
-					if (new.namespace_id, new.database_id) != (old.namespace_id, old.database_id) {
-						anyhow::bail!(CatalogError::QuotaUsageInvalid {
-							reason: "cannot replace the identity of an existing quota database"
-								.to_owned()
-						});
-					}
+				if let Some(new) = new
+					&& (new.namespace_id, new.database_id) != (old.namespace_id, old.database_id)
+				{
+					anyhow::bail!(CatalogError::QuotaUsageInvalid {
+						reason: "cannot replace the identity of an existing quota database"
+							.to_owned()
+					});
 				}
-			} else if let Some(bytes) = val {
-				let new = DatabaseDefinition::kv_decode_value(bytes, ())?;
+			} else if let Some(new) = new {
 				return Ok(Some(Defined::NewQuotaDatabase(new.namespace_id, new.database_id)));
 			}
 		}
@@ -18936,6 +18944,12 @@ mod object_version_tests {
 			Arc::new(Default::default()),
 		);
 		let sequences = Sequences::new(tf.clone(), uuid::Uuid::new_v4());
+		// The factory store has no quota ledger, so initialise the ready
+		// marker the quota tracking on catalog and record writes insists
+		// on finding before it admits a write.
+		let init = tf.transaction(TransactionType::Write, sequences.clone()).await.unwrap();
+		init.quota_usage(NS, DB).initialize_new_database().await.unwrap();
+		init.commit().await.unwrap();
 		(tf, sequences)
 	}
 
@@ -19628,6 +19642,12 @@ mod record_writes_tests {
 			Arc::new(Default::default()),
 		);
 		let sequences = Sequences::new(tf.clone(), uuid::Uuid::new_v4());
+		// The factory store has no quota ledger, so initialise the ready
+		// marker the quota tracking on catalog and record writes insists
+		// on finding before it admits a write.
+		let init = tf.transaction(TransactionType::Write, sequences.clone()).await.unwrap();
+		init.quota_usage(NS, DB).initialize_new_database().await.unwrap();
+		init.commit().await.unwrap();
 		(tf, sequences)
 	}
 
@@ -19847,6 +19867,15 @@ mod parked_write_tests {
 			Arc::new(Default::default()),
 		);
 		let sequences = Sequences::new(tf.clone(), uuid::Uuid::new_v4());
+		// The factory store has no quota ledger, so initialise the ready
+		// marker the quota tracking on catalog and record writes insists
+		// on finding before it admits a write.
+		let init = tf.transaction(TransactionType::Write, sequences.clone()).await.unwrap();
+		init.quota_usage(crate::catalog::NamespaceId(1), crate::catalog::DatabaseId(2))
+			.initialize_new_database()
+			.await
+			.unwrap();
+		init.commit().await.unwrap();
 		(tf, sequences)
 	}
 

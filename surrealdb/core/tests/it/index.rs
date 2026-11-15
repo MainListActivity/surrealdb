@@ -10,7 +10,7 @@ use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng, random};
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
-use surrealdb_types::{Array, RecordId, RecordIdKey, ToSql, Value};
+use surrealdb_types::{Array, QueryError, RecordId, RecordIdKey, ToSql, Value};
 use tokio::task;
 use tokio::task::JoinHandle;
 use tokio::time::{sleep, timeout};
@@ -19,8 +19,12 @@ use tracing::{error, info};
 
 use crate::helpers::{new_ds, new_ns_db};
 
+/// Retried like a quota conflict: the quota ledger serializes commits to one
+/// database on shared keys, so concurrent writers legitimately conflict and a
+/// retryable transaction conflict settles on retry as a quota conflict does.
 fn is_retryable_quota_error(error: &surrealdb_types::Error) -> bool {
 	error.quota_details().is_some_and(|details| details.retryable())
+		|| error.query_details() == Some(&QueryError::TransactionConflict)
 }
 
 async fn execute_one_retrying_quota_conflicts(

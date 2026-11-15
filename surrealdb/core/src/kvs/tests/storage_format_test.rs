@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use surrealdb_datastore::fork_storage::{ForkMigrationState, ForkStorageFormat};
 use surrealdb_kvs::value::KVValue;
 
@@ -6,6 +8,18 @@ use crate::key::KVKey;
 use crate::key::schema::{ForkStorageKey, VersionKey};
 use crate::kvs::version::MajorVersion;
 use crate::kvs::{Datastore, TransactionType};
+
+/// A datastore built without its startup transactions, so the store arrives
+/// unstamped: [`Datastore::check_version`] then faces whatever the test wrote
+/// instead of a marker the build already recorded.
+async fn unstamped() -> Arc<Datastore> {
+	Datastore::builder()
+		.without_maintenance_tasks()
+		.without_startup_transactions()
+		.build_with_path("memory")
+		.await
+		.unwrap()
+}
 
 async fn write_format(ds: &Datastore, version: MajorVersion, marker: Option<ForkStorageFormat>) {
 	let tx = ds.transaction(TransactionType::Write).await.unwrap();
@@ -32,7 +46,7 @@ async fn new_datastore_atomically_writes_fork_version_and_structured_marker() {
 
 #[tokio::test]
 async fn upstream_storage_requires_explicit_migration_without_silent_writes() {
-	let ds = Datastore::builder().build_with_path("memory").await.unwrap();
+	let ds = unstamped().await;
 	write_format(&ds, MajorVersion::upstream_latest(), None).await;
 
 	let error = ds.check_version().await.unwrap_err();
@@ -58,7 +72,7 @@ async fn upstream_storage_requires_explicit_migration_without_silent_writes() {
 
 #[tokio::test]
 async fn fork_version_without_marker_and_incomplete_migration_fail_closed() {
-	let ds = Datastore::builder().build_with_path("memory").await.unwrap();
+	let ds = unstamped().await;
 	write_format(&ds, MajorVersion::latest(), None).await;
 	let error = ds.check_version().await.unwrap_err();
 	assert!(crate::err::is_storage_compatibility_error(&error));
@@ -148,7 +162,7 @@ async fn undecodable_storage_version_and_marker_fail_immediately() {
 
 #[tokio::test]
 async fn unversioned_existing_data_is_not_modified_by_startup_check() {
-	let ds = Datastore::builder().build_with_path("memory").await.unwrap();
+	let ds = unstamped().await;
 	let existing_key = b"existing/data".to_vec();
 	let tx = ds.transaction(TransactionType::Write).await.unwrap();
 	tx.set(surrealdb_kvs::Key::from(existing_key.as_slice()), b"keep".to_vec()).await.unwrap();
