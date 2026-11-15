@@ -1156,6 +1156,96 @@ fn every_catalog_variant() -> Vec<(&'static str, CatalogError)> {
 				name: "sample".to_string(),
 			},
 		),
+		(
+			"QuotaNotFound",
+			CatalogError::QuotaNotFound {
+				database: "sample".to_string(),
+			},
+		),
+		(
+			"QuotaAlreadyExists",
+			CatalogError::QuotaAlreadyExists {
+				database: "sample".to_string(),
+			},
+		),
+		(
+			"QuotaGenerationMismatch",
+			CatalogError::QuotaGenerationMismatch {
+				database: "sample".to_string(),
+				expected: 1,
+				actual: 2,
+			},
+		),
+		(
+			"QuotaGenerationRequired",
+			CatalogError::QuotaGenerationRequired {
+				database: "sample".to_string(),
+			},
+		),
+		(
+			"QuotaRuleNotFound",
+			CatalogError::QuotaRuleNotFound {
+				id: "sample".to_string(),
+			},
+		),
+		(
+			"QuotaPolicyInvalid",
+			CatalogError::QuotaPolicyInvalid {
+				reason: "sample".to_string(),
+			},
+		),
+		("QuotaImportNotAllowed", CatalogError::QuotaImportNotAllowed),
+		(
+			"QuotaUsageInvalid",
+			CatalogError::QuotaUsageInvalid {
+				reason: "sample".to_string(),
+			},
+		),
+		(
+			"QuotaUsageNotReady",
+			CatalogError::QuotaUsageNotReady {
+				state: "sample".to_string(),
+			},
+		),
+		("QuotaConflict", CatalogError::QuotaConflict),
+		(
+			"QuotaPolicyChanged",
+			CatalogError::QuotaPolicyChanged {
+				database: "sample".to_string(),
+				expected: 1,
+				actual: 2,
+			},
+		),
+		(
+			"QuotaExceeded",
+			CatalogError::QuotaExceeded(Box::new(crate::catalog::QuotaExceededError {
+				database: "sample".to_string(),
+				generation: 1,
+				violations: vec![crate::catalog::QuotaViolation {
+					rule: "sample".to_string(),
+					resource: "sample".to_string(),
+					table: "sample".to_string(),
+					current: 1,
+					delta: 1,
+					projected: 2,
+					limit: 1,
+					over_by: 1,
+				}],
+				truncated: false,
+			})),
+		),
+		(
+			"ForkStorageMigrationRequired",
+			CatalogError::ForkStorageMigrationRequired {
+				actual: 3,
+			},
+		),
+		(
+			"ForkStorageFormatIncompatible",
+			CatalogError::ForkStorageFormatIncompatible {
+				reason: "sample".to_string(),
+			},
+		),
 	]
 }
 

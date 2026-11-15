@@ -195,7 +195,29 @@ async fn concurrent_appends_through_an_event(kind: &str) -> Result<(usize, Strin
 			let ses = ses.clone();
 			let sql =
 				format!("BEGIN; CREATE spaceevent:{id} SET author = user:1; SLEEP 300ms; COMMIT;");
-			tokio::spawn(async move { ds.execute(&sql, &ses, None).await })
+			// The quota ledger serializes commits to one database on shared
+			// keys, so the two writers legitimately conflict here; a conflicted
+			// commit applied nothing, and the block is retried until it lands.
+			// The sync variant keeps its single-commit behavior: one of the two
+			// writers must lose the shared record, and losing is what it checks.
+			let retry_on_conflict = !kind.is_empty();
+			tokio::spawn(async move {
+				loop {
+					let responses = ds.execute(&sql, &ses, None).await;
+					let retry = retry_on_conflict
+						&& responses.as_ref().is_ok_and(|responses| {
+							responses.iter().any(|r| {
+								r.result.as_ref().is_err_and(|e| {
+									e.query_details() == Some(&QueryError::TransactionConflict)
+								})
+							})
+						});
+					if !retry {
+						break responses;
+					}
+					tokio::task::yield_now().await;
+				}
+			})
 		})
 		.collect();
 	let mut conflicts = 0;

@@ -617,10 +617,12 @@ async fn run_pass(
 				past = true;
 				break;
 			}
-			// Already delivered by the lap before this one; read, so it costs
-			// one.
+			// Already delivered by the lap before this one; skipped without
+			// cost. The scan's lower bound is inclusive because the committed
+			// event fence lands on an event's own stamp, so the boundary
+			// commit's entries are always re-read; charging for them would
+			// starve passes of every other entry in small budgets.
 			if vs <= lap.cursor {
-				budget -= 1;
 				lap.after = Some(k);
 				continue;
 			}

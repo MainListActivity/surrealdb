@@ -211,7 +211,7 @@ mod tests {
 		}
 		let outside: Vec<&str> =
 			routes.iter().copied().filter(|route| !route.starts_with('/')).collect();
-		assert_eq!(outside, ["!bv", "!fl", "!v"]);
+		assert_eq!(outside, ["!bv", "!fl", "!v", "!vf", "!nqm"]);
 	}
 
 	fn version(major: Option<u16>, migrations: &[u32]) -> KeyspaceVersion {
@@ -225,7 +225,7 @@ mod tests {
 	#[test]
 	fn a_keyspace_this_build_can_start_from_passes() -> Result<()> {
 		let every: Vec<u32> = MIGRATIONS.iter().map(|migration| migration.id).collect();
-		for major in [MajorVersion::LATEST, MajorVersion::LEGACY] {
+		for major in [MajorVersion::LATEST] {
 			version(Some(major), &every).check()?;
 			version(Some(major), &[]).check()?;
 		}
@@ -234,7 +234,7 @@ mod tests {
 
 	#[test]
 	fn an_older_or_unversioned_major_is_refused_as_out_of_date() {
-		for major in [None, Some(1), Some(2)] {
+		for major in [None, Some(1), Some(2), Some(MajorVersion::LEGACY)] {
 			let err = version(major, &[]).check().unwrap_err();
 			assert!(
 				matches!(

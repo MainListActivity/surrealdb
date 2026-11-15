@@ -7101,25 +7101,34 @@ impl Transaction {
 			&& DatabaseKey::decode_key(key).is_ok()
 		{
 			Box::pin(self.ensure_no_native_quota_migration()).await?;
-			let old = match prior {
-				Some(old) => {
-					old.map(|bytes| DatabaseDefinition::kv_decode_value(bytes, ())).transpose()?
-				}
-				None => self
-					.tr
-					.get(key.as_borrowed(), None)
-					.await?
-					.map(|bytes| DatabaseDefinition::kv_decode_value(&bytes, ()))
-					.transpose()?,
+			let stored = match prior {
+				Some(old) => old.map(|bytes| bytes.to_vec()),
+				None => self.tr.get(key.as_borrowed(), None).await?,
 			};
+			// A definition a newer release wrote is one this build cannot
+			// classify or compare; the write passes the quota guard the way a
+			// walk passes the entry.
+			let old = match stored
+				.map(|bytes| DatabaseDefinition::kv_decode_value(&bytes, ()))
+				.transpose()
+			{
+				Ok(old) => old,
+				Err(e) if refused_by_release(&e) => return Ok(None),
+				Err(e) => return Err(e),
+			};
+			let new =
+				match val.map(|bytes| DatabaseDefinition::kv_decode_value(bytes, ())).transpose() {
+					Ok(new) => new,
+					Err(e) if refused_by_release(&e) => return Ok(None),
+					Err(e) => return Err(e),
+				};
 			if let Some(old) = old {
 				Box::pin(
 					self.quota_usage(old.namespace_id, old.database_id)
 						.ensure_writable_for_update(),
 				)
 				.await?;
-				if let Some(bytes) = val {
-					let new = DatabaseDefinition::kv_decode_value(bytes, ())?;
+				if let Some(new) = new {
 					if (new.namespace_id, new.database_id) != (old.namespace_id, old.database_id) {
 						anyhow::bail!(CatalogError::QuotaUsageInvalid {
 							reason: "cannot replace the identity of an existing quota database"
@@ -7127,8 +7136,7 @@ impl Transaction {
 						});
 					}
 				}
-			} else if let Some(bytes) = val {
-				let new = DatabaseDefinition::kv_decode_value(bytes, ())?;
+			} else if let Some(new) = new {
 				return Ok(Some(Defined::NewQuotaDatabase(new.namespace_id, new.database_id)));
 			}
 		}

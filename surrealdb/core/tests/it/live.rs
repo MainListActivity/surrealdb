@@ -8,7 +8,7 @@ use surrealdb_core::dbs::{MessageBroker, RoutedNotification, Session};
 use surrealdb_core::kvs::Datastore;
 use surrealdb_core::syn;
 use surrealdb_rpc::capabilities::Capabilities;
-use surrealdb_types::{Action, Kind, Notification, RecordId, ToSql, Value, vars};
+use surrealdb_types::{Action, Kind, Notification, QueryError, RecordId, ToSql, Value, vars};
 
 use crate::helpers::{new_ds, new_ns_db, skip_ok};
 
@@ -1529,9 +1529,23 @@ async fn every_write_committed_after_a_live_answers_reaches_it() -> Result<()> {
 				// The block commits once its SLEEP has run, so no earlier than this.
 				let commits_from =
 					tokio::time::Instant::now() + Duration::from_millis(sleep as u64);
-				let responses = dbs.execute(&sql, &ses, None).await?;
-				for response in responses {
-					response.result?;
+				// The quota ledger serializes commits to one database on shared
+				// keys, so concurrent writers legitimately conflict here; a
+				// conflicted commit applied nothing and the block is retried.
+				loop {
+					let responses = dbs.execute(&sql, &ses, None).await?;
+					if responses.iter().any(|r| {
+						r.result.as_ref().is_err_and(|e| {
+							e.query_details() == Some(&QueryError::TransactionConflict)
+						})
+					}) {
+						tokio::task::yield_now().await;
+						continue;
+					}
+					for response in responses {
+						response.result?;
+					}
+					break;
 				}
 				Ok::<_, anyhow::Error>((n, commits_from))
 			})
