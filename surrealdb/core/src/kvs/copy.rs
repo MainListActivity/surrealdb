@@ -225,10 +225,8 @@ mod tests {
 	#[test]
 	fn a_keyspace_this_build_can_start_from_passes() -> Result<()> {
 		let every: Vec<u32> = MIGRATIONS.iter().map(|migration| migration.id).collect();
-		for major in [MajorVersion::LATEST] {
-			version(Some(major), &every).check()?;
-			version(Some(major), &[]).check()?;
-		}
+		version(Some(MajorVersion::LATEST), &every).check()?;
+		version(Some(MajorVersion::LATEST), &[]).check()?;
 		Ok(())
 	}
 
