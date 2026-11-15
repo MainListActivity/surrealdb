@@ -7128,13 +7128,13 @@ impl Transaction {
 						.ensure_writable_for_update(),
 				)
 				.await?;
-				if let Some(new) = new {
-					if (new.namespace_id, new.database_id) != (old.namespace_id, old.database_id) {
-						anyhow::bail!(CatalogError::QuotaUsageInvalid {
-							reason: "cannot replace the identity of an existing quota database"
-								.to_owned()
-						});
-					}
+				if let Some(new) = new
+					&& (new.namespace_id, new.database_id) != (old.namespace_id, old.database_id)
+				{
+					anyhow::bail!(CatalogError::QuotaUsageInvalid {
+						reason: "cannot replace the identity of an existing quota database"
+							.to_owned()
+					});
 				}
 			} else if let Some(new) = new {
 				return Ok(Some(Defined::NewQuotaDatabase(new.namespace_id, new.database_id)));
