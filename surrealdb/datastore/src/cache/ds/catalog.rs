@@ -520,10 +520,37 @@ mod tests {
 			self.tf.transaction(TransactionType::Read, self.sequences.clone()).await.unwrap()
 		}
 
-		/// `DEFINE TABLE`, committed.
+		/// `DEFINE TABLE` in `db`, committed.
 		async fn define_table(&self, name: &str, id: u32) {
 			let tx = self.write().await;
 			tx.put_tb("ns", "db", &table(name, id)).await.unwrap();
+			tx.commit().await.unwrap();
+		}
+
+		/// `DEFINE DATABASE` alongside `db`, committed.
+		async fn define_db(&self, name: &str, id: DatabaseId) {
+			let tx = self.write().await;
+			tx.put_db(
+				"ns",
+				DatabaseDefinition {
+					namespace_id: NS,
+					database_id: id,
+					name: name.into(),
+					comment: None,
+					changefeed: None,
+					strict: false,
+					compatibility: Default::default(),
+				},
+			)
+			.await
+			.unwrap();
+			tx.commit().await.unwrap();
+		}
+
+		/// `DEFINE TABLE` in the database named `db` holding the id `db_id`, committed.
+		async fn define_table_in(&self, db: &str, db_id: DatabaseId, name: &str, id: u32) {
+			let tx = self.write().await;
+			tx.put_tb("ns", db, &table_in(NS, db_id, name, id)).await.unwrap();
 			tx.commit().await.unwrap();
 		}
 
@@ -539,9 +566,13 @@ mod tests {
 	}
 
 	fn table(name: &str, id: u32) -> TableDefinition {
+		table_in(NS, DB, name, id)
+	}
+
+	fn table_in(ns: NamespaceId, db: DatabaseId, name: &str, id: u32) -> TableDefinition {
 		TableDefinition::from_stored(&StoredTableDefinition::new(
-			NS,
-			DB,
+			ns,
+			db,
 			TableId(id),
 			TableName::from(name),
 		))
@@ -873,10 +904,14 @@ mod tests {
 		assert_eq!(tx.metrics_snapshot_for_test().ops_get, reads, "answered from the cache");
 
 		tx.put_tb_field(NS, DB, &person, &field("person", "name")).await.unwrap();
+		// A catalog write's own bookkeeping (the quota ledger bind and fence
+		// probes) is storage work of its own; the reads counted from here are
+		// the ones the version answers alone.
+		let minted_reads = tx.metrics_snapshot_for_test().ops_get;
 		let minted = tx.catalog_version(NS, DB, &person).await.unwrap();
 		assert!(minted.is_some());
 		assert_ne!(minted, stamped, "the stamp this transaction wrote is what it reads");
-		assert_eq!(tx.metrics_snapshot_for_test().ops_get, reads);
+		assert_eq!(tx.metrics_snapshot_for_test().ops_get, minted_reads);
 		tx.cancel().await.unwrap();
 	}
 
@@ -887,12 +922,17 @@ mod tests {
 	async fn ddl_on_different_tables_does_not_conflict() {
 		let store = Store::new().await;
 		store.define_table("person", 1).await;
-		store.define_table("company", 2).await;
+		// Quota bookkeeping writes the per-database usage ledger on every
+		// catalog write, so two transactions can only be disjoint when their
+		// databases are too.
+		const DB2: DatabaseId = DatabaseId(3);
+		store.define_db("db2", DB2).await;
+		store.define_table_in("db2", DB2, "company", 2).await;
 
 		let a = store.write().await;
 		let b = store.write().await;
 		a.put_tb_field(NS, DB, &TableName::from("person"), &field("person", "name")).await.unwrap();
-		b.put_tb_field(NS, DB, &TableName::from("company"), &field("company", "name"))
+		b.put_tb_field(NS, DB2, &TableName::from("company"), &field("company", "name"))
 			.await
 			.unwrap();
 		a.commit().await.unwrap();
@@ -901,7 +941,7 @@ mod tests {
 		let a = store.write().await;
 		let b = store.write().await;
 		a.put_tb("ns", "db", &table("order", 3)).await.unwrap();
-		b.put_tb("ns", "db", &table("invoice", 4)).await.unwrap();
+		b.put_tb("ns", "db2", &table_in(NS, DB2, "invoice", 4)).await.unwrap();
 		a.commit().await.unwrap();
 		b.commit().await.expect("defining another table is not a conflicting write");
 	}

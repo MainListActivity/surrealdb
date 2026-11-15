@@ -18936,6 +18936,12 @@ mod object_version_tests {
 			Arc::new(Default::default()),
 		);
 		let sequences = Sequences::new(tf.clone(), uuid::Uuid::new_v4());
+		// The factory store has no quota ledger, so initialise the ready
+		// marker the quota tracking on catalog and record writes insists
+		// on finding before it admits a write.
+		let init = tf.transaction(TransactionType::Write, sequences.clone()).await.unwrap();
+		init.quota_usage(NS, DB).initialize_new_database().await.unwrap();
+		init.commit().await.unwrap();
 		(tf, sequences)
 	}
 
@@ -19628,6 +19634,12 @@ mod record_writes_tests {
 			Arc::new(Default::default()),
 		);
 		let sequences = Sequences::new(tf.clone(), uuid::Uuid::new_v4());
+		// The factory store has no quota ledger, so initialise the ready
+		// marker the quota tracking on catalog and record writes insists
+		// on finding before it admits a write.
+		let init = tf.transaction(TransactionType::Write, sequences.clone()).await.unwrap();
+		init.quota_usage(NS, DB).initialize_new_database().await.unwrap();
+		init.commit().await.unwrap();
 		(tf, sequences)
 	}
 
@@ -19847,6 +19859,15 @@ mod parked_write_tests {
 			Arc::new(Default::default()),
 		);
 		let sequences = Sequences::new(tf.clone(), uuid::Uuid::new_v4());
+		// The factory store has no quota ledger, so initialise the ready
+		// marker the quota tracking on catalog and record writes insists
+		// on finding before it admits a write.
+		let init = tf.transaction(TransactionType::Write, sequences.clone()).await.unwrap();
+		init.quota_usage(crate::catalog::NamespaceId(1), crate::catalog::DatabaseId(2))
+			.initialize_new_database()
+			.await
+			.unwrap();
+		init.commit().await.unwrap();
 		(tf, sequences)
 	}
 
