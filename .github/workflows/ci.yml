@@ -1771,7 +1771,13 @@ jobs:
   upgrade-tests:
     name: Upgrade tests - ${{ matrix.engine }} (${{ matrix.arch }})
     needs: [build, upgrade-harness, changes]
-    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true')
+    # This lane opens a directory a released upstream binary wrote in place.
+    # The native-quota fork refuses exactly that: a store without the fork's
+    # version/marker pair fails closed, and surrealkv/rocksdb conversions are
+    # uncertified, so every test it schedules must fail here. Fork upgrade
+    # verification lives in the `datastore migrate` lane instead, so this job
+    # stays off on the fork.
+    if: github.repository != 'MainListActivity/surrealdb' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.event.pull_request.draft != true && needs.changes.outputs.docs_only != 'true')
     runs-on: ${{ github.repository == 'surrealdb/surrealdb' && format('runner-{0}-16-cores', matrix.arch) || (matrix.arch == 'arm' && 'ubuntu-24.04-arm' || 'ubuntu-24.04') }}
     strategy:
       fail-fast: false

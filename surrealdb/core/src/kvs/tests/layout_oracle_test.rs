@@ -625,6 +625,12 @@ async fn upgraded() -> Arc<Datastore> {
 		.unwrap();
 	let txn = ds.transaction(Write).await.unwrap();
 	txn.set_key(&VersionKey {}, &MajorVersion::latest()).await.unwrap();
+	txn.set_key(
+		&crate::key::schema::ForkStorageKey {},
+		&surrealdb_datastore::fork_storage::ForkStorageFormat::current(),
+	)
+	.await
+	.unwrap();
 	txn.set_key(&StorageVersionKey {}, &StorageVersion::parse("3.3.0").unwrap()).await.unwrap();
 	txn.commit().await.unwrap();
 	ds.check_version().await.unwrap();

@@ -932,6 +932,12 @@ pub struct Transaction {
 	/// and a range delete reserves one slot regardless of its (unreported)
 	/// per-key expansion.
 	guarded_writes: AtomicU64,
+	/// Suspend count for the write-cardinality guard: while above zero,
+	/// [`Self::reserve_write_slot`] takes no slot. Internal bookkeeping a
+	/// statement transaction performs on the engine's own behalf — quota
+	/// accounting, storage-format maintenance — is not part of the statement's
+	/// physical write fan-out the limit exists to bound.
+	write_guard_suspension: AtomicU64,
 	/// Durable index-build reservations to release once this transaction is closed.
 	///
 	/// Writers enqueue index appendings for a durable concurrent index build after
@@ -2446,6 +2452,7 @@ impl Transaction {
 			interrupted_write_poisoned: AtomicBool::new(false),
 			commit_outcome_unknown: AtomicBool::new(false),
 			guarded_writes: AtomicU64::new(0),
+			write_guard_suspension: AtomicU64::new(0),
 			pending_index_build_reservations: Mutex::new(Vec::new()),
 			cached_index_build_reservations: Mutex::new(HashMap::new()),
 			cached_index_admissions: Default::default(),
@@ -2509,8 +2516,10 @@ impl Transaction {
 	fn reserve_write_slot(&self) -> Result<StateChange<'_>> {
 		let changed = self.state_change();
 		// A speculation's writes never reach the storage, so they spend none
-		// of the statement's write allowance.
-		if self.tr.speculating() {
+		// of the statement's write allowance; the same holds for writes made
+		// while internal bookkeeping holds the guard suspended
+		// ([`Self::unguard_writes`]).
+		if self.tr.speculating() || self.write_guard_suspension.load(Ordering::Relaxed) > 0 {
 			return Ok(changed);
 		}
 		if let Some(limit) = self.write_keys_limit.get()
@@ -2531,6 +2540,22 @@ impl Transaction {
 			.into());
 		}
 		Ok(changed)
+	}
+
+	/// Holds the write-cardinality guard suspended until the returned guard
+	/// drops: internal bookkeeping a transaction performs for the engine —
+	/// quota accounting, storage-format maintenance — is not part of the
+	/// statement's write fan-out the limit bounds, so it reserves no slot.
+	/// Counted, so nested scopes suspend and restore correctly.
+	pub(crate) fn unguard_writes(&self) -> impl Drop + '_ {
+		struct Suspended<'a>(&'a Transaction);
+		impl Drop for Suspended<'_> {
+			fn drop(&mut self) {
+				self.0.write_guard_suspension.fetch_sub(1, Ordering::Relaxed);
+			}
+		}
+		self.write_guard_suspension.fetch_add(1, Ordering::Relaxed);
+		Suspended(self)
 	}
 
 	/// Attach pre-resolved tenant identity so the emitted
@@ -2772,6 +2797,7 @@ impl Transaction {
 		expected_marker: &crate::fork_storage::ForkStorageFormat,
 		expected_journal: &[u8],
 	) -> Result<()> {
+		let _unguarded = self.unguard_writes();
 		use crate::fork_storage::{ForkMigrationState, ForkStorageFormat};
 		use crate::key::schema::{ForkStorageKey, NativeQuotaMigrationKey, VersionKey};
 		let invalid = || CatalogError::QuotaUsageInvalid {
@@ -11028,6 +11054,7 @@ impl Transaction {
 			interrupted_write_poisoned: AtomicBool::new(false),
 			commit_outcome_unknown: AtomicBool::new(false),
 			guarded_writes: AtomicU64::new(0),
+			write_guard_suspension: AtomicU64::new(0),
 			pending_index_build_reservations: Mutex::new(Vec::new()),
 			cached_index_build_reservations: Mutex::new(HashMap::new()),
 			cached_index_admissions: Default::default(),
@@ -18640,6 +18667,12 @@ mod build_epoch_tests {
 			Arc::new(Default::default()),
 		);
 		let sequences = Sequences::new(tf.clone(), uuid::Uuid::new_v4());
+		// The factory store has no quota ledger, so initialise the ready
+		// marker the quota tracking on catalog and record writes insists
+		// on finding before it admits a write.
+		let init = tf.transaction(TransactionType::Write, sequences.clone()).await.unwrap();
+		init.quota_usage(NS, DB).initialize_new_database().await.unwrap();
+		init.commit().await.unwrap();
 		(tf, sequences)
 	}
 
@@ -19261,6 +19294,12 @@ mod older_build_write_tests {
 			Arc::new(Default::default()),
 		);
 		let sequences = Sequences::new(tf.clone(), uuid::Uuid::new_v4());
+		// The factory store has no quota ledger, so initialise the ready
+		// marker the quota tracking on catalog and record writes insists
+		// on finding before it admits a write.
+		let init = tf.transaction(TransactionType::Write, sequences.clone()).await.unwrap();
+		init.quota_usage(NS, DB).initialize_new_database().await.unwrap();
+		init.commit().await.unwrap();
 		(tf, sequences)
 	}
 

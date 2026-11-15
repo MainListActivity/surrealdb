@@ -22636,7 +22636,10 @@ async fn parallel_creates_over_a_fulltext_index_all_commit() -> Result<()> {
 		tasks.push(tokio::spawn(async move {
 			for n in 0..CREATES {
 				let sql = format!("CREATE doc SET body = 'hello world {n} from {writer}'");
-				execute_all(&ds, &session, &sql).await?;
+				// Every CREATE also advances the fork's shared per-database
+				// quota ledger, so parallel writers legitimately conflict on
+				// those bookkeeping keys; conflict-and-retry is the protocol.
+				execute_all_retrying_conflicts(&ds, &session, &sql).await?;
 			}
 			Ok::<_, anyhow::Error>(())
 		}));
@@ -23349,6 +23352,11 @@ async fn index_format_stamp_is_admitted_to_the_feature_level() -> Result<()> {
 	let tx = legacy.transaction(TransactionType::Write).await?;
 	tx.set_key(&crate::key::schema::VersionKey {}, &crate::kvs::version::MajorVersion::latest())
 		.await?;
+	tx.set_key(
+		&crate::key::schema::ForkStorageKey {},
+		&surrealdb_datastore::fork_storage::ForkStorageFormat::current(),
+	)
+	.await?;
 	tx.set_key(
 		&crate::key::schema::StorageVersionKey {},
 		&crate::kvs::version::StorageVersion::parse("3.3.0")?,

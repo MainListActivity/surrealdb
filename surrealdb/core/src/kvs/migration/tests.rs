@@ -92,6 +92,12 @@ mod datastore {
 		at_the_legacy_level(ds).await;
 		let txn = ds.transaction(TransactionType::Write).await.unwrap();
 		txn.set_key(&VersionKey {}, &MajorVersion::latest()).await.unwrap();
+		txn.set_key(
+			&crate::key::schema::ForkStorageKey {},
+			&surrealdb_datastore::fork_storage::ForkStorageFormat::current(),
+		)
+		.await
+		.unwrap();
 		txn.set_key(&StorageVersionKey {}, &StorageVersion::parse(version).unwrap()).await.unwrap();
 		txn.commit().await.unwrap();
 	}
@@ -811,6 +817,12 @@ mod datastore {
 		at_the_legacy_level(ds).await;
 		let txn = ds.transaction(TransactionType::Write).await.unwrap();
 		txn.set_key(&VersionKey {}, &MajorVersion::latest()).await.unwrap();
+		txn.set_key(
+			&crate::key::schema::ForkStorageKey {},
+			&surrealdb_datastore::fork_storage::ForkStorageFormat::current(),
+		)
+		.await
+		.unwrap();
 		txn.commit().await.unwrap();
 	}
 }

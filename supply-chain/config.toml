@@ -85,6 +85,12 @@ audit-as-crates-io = false
 [policy.surrealdb-kvs-mem]
 audit-as-crates-io = false
 
+[policy.surrealdb-kvs-rocksdb]
+audit-as-crates-io = false
+
+[policy.surrealdb-kvs-tikv]
+audit-as-crates-io = false
+
 [policy.surrealdb-kvs-surrealkv]
 audit-as-crates-io = false
 

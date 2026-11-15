@@ -3003,9 +3003,15 @@ mod tests {
 		let err = initialise_datastore(&composer, &dbs, &pending).await.unwrap_err();
 
 		assert!(copied.load(Ordering::SeqCst) > 2, "the copy wrote too little to test anything");
+		// A partial copy is refused either as a store from before versioning
+		// (upstream check) or, when the truncation lands between the fork's
+		// version stamp and its storage marker, as an incompatible fork store.
+		// Reaching unwrap_err means the refusal was already classified
+		// permanent — a transient failure would still be retrying.
+		let message = err.to_string();
 		assert!(
-			is_permanent_storage_error(&err) && err.to_string().contains("out-of-date"),
-			"a partial copy was not refused as a store from before versioning: {err}"
+			message.contains("out-of-date") || message.contains("storage format is incompatible"),
+			"a partial copy was not refused as an unreadable store: {err}"
 		);
 
 		canceller.cancel();

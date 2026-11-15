@@ -7,20 +7,21 @@ use std::sync::Arc;
 use anyhow::{Result, bail};
 use surrealdb_catalog::{Error, QuotaExceededError, QuotaViolation};
 use surrealdb_collections::map;
-use surrealdb_kvs::key::{KVKey, KVKeyDecode, Resumable};
+use surrealdb_kvs::key::{AnyRange, KVKey, KVKeyDecode, KVSubspace, Resumable};
 use surrealdb_kvs::value::KVValue;
 
 use super::Transaction;
 use crate::NORMAL_BATCH_SIZE;
 use crate::catalog::providers::{DatabaseProvider, TableProvider};
 use crate::catalog::{
-	DatabaseId, NamespaceId, QuotaLimit, QuotaPolicyDefinition, QuotaResource, QuotaSelector,
-	QuotaUsageMeta, QuotaUsageState, TableDefinition, TableType,
+	DatabaseId, FromStored, NamespaceId, QuotaLimit, QuotaPolicyDefinition, QuotaResource,
+	QuotaSelector, QuotaUsageMeta, QuotaUsageState, StoredTableDefinition, TableDefinition,
+	TableType,
 };
 use crate::key::schema::{
 	QuotaEpochRoot, QuotaFieldUsageKey as QuotaFieldUsage, QuotaGenerationKey as Qg,
 	QuotaLatestChangeKey as Ql, QuotaRecordUsageKey as QuotaRecordUsage,
-	QuotaTableBucketKey as QuotaTableBucket, QuotaUsageMetaKey as Qm,
+	QuotaTableBucketKey as QuotaTableBucket, QuotaUsageMetaKey as Qm, TablePrefix,
 };
 #[cfg(any(test, feature = "test-hooks"))]
 use crate::testing::{QuotaFaultSite, maybe_inject_quota_fault};
@@ -161,6 +162,7 @@ impl Transaction {
 		key: &'a [u8],
 		deleting: bool,
 	) -> crate::catalog::providers::BoxProviderFut<'a, Result<()>> {
+		let _unguarded = self.unguard_writes();
 		Box::pin(async move {
 			if self.quota_catalog_migration.load(std::sync::atomic::Ordering::Relaxed)
 				&& crate::key::schema::FieldKey::decode_key(key).is_ok()
@@ -222,14 +224,52 @@ impl Transaction {
 	// These are storage admission reads, not compiler dependencies. Declare only
 	// the actual catalog loads unsealed, retaining normal read recording.
 	async fn guard_lightweight_quota_writes(&self, ns: NamespaceId, db: DatabaseId) -> Result<()> {
-		let tables = crate::catalog_reads::sealed(false, self.all_tb(ns, db, None)).await?;
-		let lightweight = tables
-			.iter()
-			.filter(|table| {
-				matches!(&table.table_type,
-			TableType::Relation(relation) if relation.lightweight)
-			})
-			.collect::<Vec<_>>();
+		let _unguarded = self.unguard_writes();
+		let tables = crate::catalog_reads::sealed(false, self.all_tb(ns, db, None)).await;
+		let lightweight = match tables {
+			Err(err) if crate::tx::refused_by_release(&err) => {
+				// One of the table definitions was written by a newer release
+				// than this build reads and refuses to decode. The guard only
+				// needs each table's type, so fall back to a per-entry scan that
+				// skips the unreadable ones rather than poisoning the write.
+				crate::catalog_reads::sealed(false, async {
+					let range = TablePrefix {
+						ns,
+						db,
+					}
+					.raw_range()?
+					.into_key_range();
+					let entries = self.tr.getr(range, None).await?;
+					let mut lightweight = Vec::new();
+					for (_, value) in entries.values {
+						match StoredTableDefinition::kv_decode_value(value.as_slice(), ()) {
+							Ok(stored) => {
+								let table = TableDefinition::from_stored(&stored)?;
+								if matches!(
+									&table.table_type,
+									TableType::Relation(relation) if relation.lightweight
+								) {
+									lightweight.push(table.name.clone());
+								}
+							}
+							Err(err) if crate::tx::refused_by_release(&err) => {}
+							Err(err) => return Err(err),
+						}
+					}
+					Ok(lightweight)
+				})
+				.await?
+			}
+			Err(err) => return Err(err),
+			Ok(tables) => tables
+				.iter()
+				.filter(|table| {
+					matches!(&table.table_type,
+				TableType::Relation(relation) if relation.lightweight)
+				})
+				.map(|table| table.name.clone())
+				.collect::<Vec<_>>(),
+		};
 		if lightweight.is_empty() {
 			return Ok(());
 		}
@@ -239,12 +279,12 @@ impl Transaction {
 			for table in lightweight {
 				if policy.rules.iter().any(|rule| {
 					rule.resource == QuotaResource::Record
-						&& selector_matches(&rule.selector, &table.name)
+						&& selector_matches(&rule.selector, &table)
 				}) {
 					bail!(Error::QuotaUsageInvalid {
 						reason: format!(
 							"record quota accounting for lightweight relation '{}' is unsupported; remove its matching RECORD rule before table writes",
-							table.name
+							table
 						),
 					});
 				}
@@ -259,6 +299,7 @@ impl Transaction {
 		db: DatabaseId,
 		shared: bool,
 	) -> Result<()> {
+		let _unguarded = self.unguard_writes();
 		let generation_key = Qg {
 			ns,
 			db,
@@ -290,6 +331,7 @@ impl Transaction {
 		is_table: bool,
 		deleting: bool,
 	) -> crate::catalog::providers::BoxProviderFut<'a, Result<()>> {
+		let _unguarded = self.unguard_writes();
 		Box::pin(async move {
 			self.quota_usage(ns, db).ensure_writable_for_update().await?;
 			{
@@ -344,6 +386,7 @@ impl Transaction {
 	/// Resolve all transaction-local quota intents and stage one conditional
 	/// counter update per affected bucket.
 	pub async fn flush_quota_usage(&self) -> Result<()> {
+		let _unguarded = self.unguard_writes();
 		if let Err(error) = self.flush_quota_usage_inner().await {
 			let state = self.quota_state.lock().await;
 			let policy_admission = state.flushed_policy_admission
@@ -382,7 +425,18 @@ impl Transaction {
 						},
 						None,
 					)
-					.await?;
+					.await;
+				let table = match table {
+					Err(err) if crate::tx::refused_by_release(&err) => {
+						// The table definition was written by a newer release
+						// than this build reads. Whether its `in`/`out` fields
+						// are billable cannot be proven without decoding it, so
+						// the field stays billable rather than poisoning the
+						// whole transaction's commit.
+						return Ok(true);
+					}
+					other => other?,
+				};
 				if table.is_some_and(|table| matches!(table.table_type, TableType::Relation(_))) {
 					return Ok(false);
 				}
@@ -829,6 +883,7 @@ impl QuotaTransaction<'_> {
 	/// Install every non-zero counter from a trusted scan into the currently
 	/// staged epoch.
 	pub async fn stage_rebuild_scan(&self, scan: &QuotaRebuildScan) -> Result<()> {
+		let _unguarded = self.tx.unguard_writes();
 		for ((generation, rule), count) in &scan.snapshot.table_buckets {
 			self.set_staged_table_bucket_count(*generation, rule, *count).await?;
 		}
@@ -915,6 +970,7 @@ impl QuotaTransaction<'_> {
 		policy: &QuotaPolicyDefinition,
 		tables: &[TableDefinition],
 	) -> Result<()> {
+		let _unguarded = self.tx.unguard_writes();
 		let meta = self.ensure_writable_for_update().await?;
 		let epoch = meta.active_epoch.expect("ready metadata has an active epoch");
 		for rule in policy.rules.iter().filter(|rule| rule.resource == QuotaResource::Table) {
@@ -939,6 +995,7 @@ impl QuotaTransaction<'_> {
 	}
 
 	async fn bind_database(&self) -> Result<()> {
+		let _unguarded = self.tx.unguard_writes();
 		if self.tx.quota_state.lock().await.current.databases.contains_key(&(self.ns, self.db)) {
 			return Ok(());
 		}
@@ -995,6 +1052,7 @@ impl QuotaTransaction<'_> {
 	}
 
 	pub(crate) async fn reset_table_usage(&self, table: &TableName) -> Result<()> {
+		let _unguarded = self.tx.unguard_writes();
 		let mut state = self.tx.quota_state.lock().await;
 		let key = (self.ns, self.db, table.clone());
 		// Earlier per-field deltas are subsumed by the table deletion. Only
@@ -1045,6 +1103,7 @@ impl QuotaTransaction<'_> {
 
 	/// Initialise the protected empty ledger for a newly-created database.
 	pub async fn initialize_new_database(&self) -> Result<()> {
+		let _unguarded = self.tx.unguard_writes();
 		let key = Qm {
 			ns: self.ns,
 			db: self.db,
@@ -1076,6 +1135,7 @@ impl QuotaTransaction<'_> {
 
 	/// Reject normal writes unless the active ledger has been validated.
 	pub async fn ensure_writable(&self) -> Result<QuotaUsageMeta> {
+		let _unguarded = self.tx.unguard_writes();
 		self.tx.ensure_no_native_quota_migration().await?;
 		let meta = self.meta().await?;
 		if meta.state != QuotaUsageState::Ready {
@@ -1089,6 +1149,7 @@ impl QuotaTransaction<'_> {
 	/// Reassert observed metadata so this transaction conflicts with a
 	/// concurrent maintenance-state transition at commit time.
 	async fn reassert_meta(&self, meta: &QuotaUsageMeta) -> Result<()> {
+		let _unguarded = self.tx.unguard_writes();
 		// A shared conflict-tracked read prevents a concurrent rebuild from
 		// committing unnoticed without making unrelated writers conflict with
 		// each other. Backends with exclusive locked reads retain the existing
@@ -1121,6 +1182,7 @@ impl QuotaTransaction<'_> {
 	/// Guard a protected metadata mutation against a concurrent maintenance
 	/// fence without making ordinary, non-quota writes contend on `Qm`.
 	pub async fn ensure_writable_for_update(&self) -> Result<QuotaUsageMeta> {
+		let _unguarded = self.tx.unguard_writes();
 		let meta = self.ensure_writable().await?;
 		self.reassert_meta(&meta).await?;
 		Ok(meta)
@@ -1128,6 +1190,7 @@ impl QuotaTransaction<'_> {
 
 	/// Persist the maintenance fence and allocate a new staged epoch.
 	pub async fn begin_rebuild(&self) -> Result<u64> {
+		let _unguarded = self.tx.unguard_writes();
 		let key = Qm {
 			ns: self.ns,
 			db: self.db,
@@ -1151,6 +1214,7 @@ impl QuotaTransaction<'_> {
 	/// The caller must commit this state before installing external data. Only a
 	/// later trusted rebuild may return the database to `Ready`.
 	pub async fn begin_external_write_maintenance(&self) -> Result<()> {
+		let _unguarded = self.tx.unguard_writes();
 		let key = Qm {
 			ns: self.ns,
 			db: self.db,
@@ -1166,6 +1230,7 @@ impl QuotaTransaction<'_> {
 
 	/// Mark the ledger corrupt while retaining its last active epoch for diagnostics.
 	pub async fn mark_corrupt(&self) -> Result<()> {
+		let _unguarded = self.tx.unguard_writes();
 		let key = Qm {
 			ns: self.ns,
 			db: self.db,
@@ -1212,6 +1277,7 @@ impl QuotaTransaction<'_> {
 
 	/// Replace one staged record counter with the rebuilt snapshot count.
 	pub async fn set_staged_record_count(&self, table: &TableName, count: u64) -> Result<()> {
+		let _unguarded = self.tx.unguard_writes();
 		let epoch = self.staged_epoch_for_update().await?;
 		let key = QuotaRecordUsage {
 			ns: self.ns,
@@ -1229,6 +1295,7 @@ impl QuotaTransaction<'_> {
 
 	/// Replace one staged field counter with the rebuilt snapshot count.
 	pub async fn set_staged_field_count(&self, table: &TableName, count: u64) -> Result<()> {
+		let _unguarded = self.tx.unguard_writes();
 		let epoch = self.staged_epoch_for_update().await?;
 		let key = QuotaFieldUsage {
 			ns: self.ns,
@@ -1251,6 +1318,7 @@ impl QuotaTransaction<'_> {
 		rule: &str,
 		count: u64,
 	) -> Result<()> {
+		let _unguarded = self.tx.unguard_writes();
 		let epoch = self.staged_epoch_for_update().await?;
 		let key = QuotaTableBucket {
 			ns: self.ns,
@@ -1335,6 +1403,7 @@ impl QuotaTransaction<'_> {
 		&self,
 		expected: &QuotaUsageSnapshot,
 	) -> Result<ValidatedQuotaEpoch> {
+		let _unguarded = self.tx.unguard_writes();
 		let epoch = self.staged_epoch().await?;
 		let actual = self.read_epoch_snapshot(epoch).await?;
 		if actual != *expected {
@@ -1357,6 +1426,7 @@ impl QuotaTransaction<'_> {
 
 	/// Atomically make a validated staged epoch active and remove the maintenance fence.
 	pub async fn activate_validated_epoch(&self, validated: ValidatedQuotaEpoch) -> Result<()> {
+		let _unguarded = self.tx.unguard_writes();
 		if validated.ns != self.ns || validated.db != self.db {
 			bail!(Error::QuotaUsageInvalid {
 				reason: "validated quota epoch belongs to another database".to_owned(),
@@ -1395,6 +1465,7 @@ impl QuotaTransaction<'_> {
 
 	/// Remove a non-active, non-staged epoch after a successful switch.
 	pub async fn clear_inactive_epoch(&self, epoch: u64) -> Result<()> {
+		let _unguarded = self.tx.unguard_writes();
 		let meta = self.meta().await?;
 		if meta.active_epoch == Some(epoch) || meta.staged_epoch == Some(epoch) {
 			bail!(Error::QuotaUsageInvalid {
@@ -1431,6 +1502,7 @@ impl QuotaTransaction<'_> {
 	where
 		K: KVKey<Value = u64> + std::fmt::Debug,
 	{
+		let _unguarded = self.tx.unguard_writes();
 		let current = self.tx.get_key(&key, None).await?;
 		let current_value = current.unwrap_or(0);
 		let next = current_value.checked_add(amount).ok_or_else(|| Error::QuotaUsageInvalid {
@@ -1446,6 +1518,7 @@ impl QuotaTransaction<'_> {
 	where
 		K: KVKey<Value = u64> + std::fmt::Debug,
 	{
+		let _unguarded = self.tx.unguard_writes();
 		let current = self.tx.get_key(&key, None).await?;
 		let current_value = current.unwrap_or(0);
 		let next = current_value.checked_sub(amount).ok_or_else(|| Error::QuotaUsageInvalid {

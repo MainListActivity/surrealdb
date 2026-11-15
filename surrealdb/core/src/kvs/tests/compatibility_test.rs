@@ -72,6 +72,12 @@ async fn applied(ds: &Datastore, id: u32) -> bool {
 async fn written_by_an_earlier_release(ds: &Datastore) {
 	let txn = ds.transaction(Write).await.unwrap();
 	txn.set_key(&VersionKey {}, &MajorVersion::latest()).await.unwrap();
+	txn.set_key(
+		&crate::key::schema::ForkStorageKey {},
+		&surrealdb_datastore::fork_storage::ForkStorageFormat::current(),
+	)
+	.await
+	.unwrap();
 	txn.set_key(&StorageVersionKey {}, &StorageVersion::parse("3.3.0").unwrap()).await.unwrap();
 	txn.ensure_ns_db(None, "test", "test").await.unwrap();
 	txn.commit().await.unwrap();

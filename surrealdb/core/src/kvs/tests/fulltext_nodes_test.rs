@@ -394,6 +394,12 @@ async fn upgraded(ds: &Datastore) {
 
 	let txn = ds.transaction(TransactionType::Write).await.expect("a write transaction");
 	txn.set_key(&VersionKey {}, &MajorVersion::latest()).await.expect("the version");
+	txn.set_key(
+		&crate::key::schema::ForkStorageKey {},
+		&surrealdb_datastore::fork_storage::ForkStorageFormat::current(),
+	)
+	.await
+	.expect("the marker");
 	let storage = StorageVersion::parse("3.3.0").expect("a storage version");
 	txn.set_key(&StorageVersionKey {}, &storage).await.expect("the storage version");
 	txn.commit().await.expect("commit the versions");

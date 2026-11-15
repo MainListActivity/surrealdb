@@ -8,6 +8,7 @@ use surrealdb_catalog as catalog;
 use surrealdb_core::{dbs, kvs};
 use surrealdb_datastore::key;
 use surrealdb_expr::val;
+use surrealdb_rpc::query::QueryResult;
 
 #[path = "native_quota_frozen_migration.rs"]
 mod frozen_migration;
@@ -26,7 +27,7 @@ trait QuotaTransactionTestExt {
 		session: &dbs::Session,
 		vars: Option<surrealdb_types::Variables>,
 		transaction: std::sync::Arc<kvs::Transaction>,
-	) -> Result<Vec<surrealdb_rpc::query::QueryResult>, surrealdb_types::Error>;
+	) -> Result<Vec<QueryResult>, surrealdb_types::Error>;
 }
 impl QuotaTransactionTestExt for kvs::Datastore {
 	async fn execute_with_transaction(
@@ -35,7 +36,7 @@ impl QuotaTransactionTestExt for kvs::Datastore {
 		session: &dbs::Session,
 		vars: Option<surrealdb_types::Variables>,
 		transaction: std::sync::Arc<kvs::Transaction>,
-	) -> Result<Vec<surrealdb_rpc::query::QueryResult>, surrealdb_types::Error> {
+	) -> Result<Vec<QueryResult>, surrealdb_types::Error> {
 		self.run(
 			kvs::QueryRequest::new(sql, session).with_variables(vars).with_transaction(transaction),
 		)

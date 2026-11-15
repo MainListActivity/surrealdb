@@ -2163,6 +2163,12 @@ mod test {
 
 		let txn = dbs.transaction(Write).await.unwrap();
 		txn.set_key(&VersionKey {}, &MajorVersion::latest()).await.unwrap();
+		txn.set_key(
+			&crate::key::schema::ForkStorageKey {},
+			&surrealdb_datastore::fork_storage::ForkStorageFormat::current(),
+		)
+		.await
+		.unwrap();
 		txn.commit().await.unwrap();
 	}
 

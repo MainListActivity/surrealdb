@@ -320,6 +320,12 @@ async fn a_bootstrap_another_node_finished_is_not_reported_as_created_here() {
 	// its claim and stamped the datastore first.
 	let txn = ds.transaction(surrealdb_kvs::TransactionType::Write).await.unwrap();
 	txn.set_key(&VersionKey {}, &MajorVersion::latest()).await.unwrap();
+	txn.set_key(
+		&crate::key::schema::ForkStorageKey {},
+		&surrealdb_datastore::fork_storage::ForkStorageFormat::current(),
+	)
+	.await
+	.unwrap();
 	txn.commit().await.unwrap();
 
 	assert_eq!(
@@ -422,54 +428,75 @@ async fn stored_stamp(ds: &Datastore) -> Option<String> {
 	ds.storage_version().await.unwrap().map(|s| s.to_string())
 }
 
-/// A datastore a 3.x release last wrote is refused unless the operator opts in,
-/// whether or not that release wrote the version stamp, and the refusal leaves
-/// it as it was found.
+/// A datastore a 3.x release last wrote is refused by the fork's storage
+/// fence whether or not that release wrote the version stamp: upstream stores
+/// reach this build only through the explicit offline migrator, and the
+/// refusal leaves them as they were found.
 #[tokio::test]
 async fn a_datastore_written_by_3x_is_refused_by_default() {
 	for (stamp, reported) in [(Some("3.3.2"), "3.3.2"), (None, "3.x (earlier than 3.3.0)")] {
 		let ds = written_by_3x(surrealdb_cnf::ConfigMap::empty(), stamp).await;
 
 		let err = ds.check_version().await.unwrap_err();
-		let Some(DatastoreError::UpgradeFrom3xNotEnabled {
-			stored,
-			..
-		}) = err.downcast_ref::<DatastoreError>()
+		let Some(surrealdb_catalog::Error::ForkStorageMigrationRequired {
+			actual,
+		}) = err.downcast_ref::<surrealdb_catalog::Error>()
 		else {
-			panic!("a datastore written by {reported} was not refused: {err}");
+			panic!("a datastore written by {reported} was not refused by the fork fence: {err}");
 		};
-		assert_eq!(stored, reported);
-		assert!(err.to_string().contains("SURREAL_EXPERIMENTAL_UPGRADE_FROM_3X=true"));
+		assert_eq!(*actual, u16::from(MajorVersion::from(MajorVersion::LEGACY)));
+		assert!(err.to_string().contains("explicit migration"));
 		assert_eq!(stored_stamp(&ds).await.as_deref(), stamp, "the refusal changed the stamp");
 		assert!(ds.applied_migration_ids().await.unwrap().is_empty(), "the refusal migrated");
 		assert_eq!(stored_major(&ds).await, Some(MajorVersion::from(MajorVersion::LEGACY)));
 	}
 }
 
-/// With the opt-in, a datastore a 3.x release last wrote is upgraded: its
-/// migrations run and it is stamped with this build, so a later start finds a
-/// datastore of this line and needs no opt-in.
+/// The experimental in-place upgrade opt-in cannot move a 3.x store: the
+/// fork's fence refuses it before the opt-in check runs, so even opted-in
+/// starts are sent to the explicit offline migrator.
 #[tokio::test]
-async fn a_datastore_written_by_3x_is_upgraded_when_opted_in() {
+async fn a_datastore_written_by_3x_is_not_upgraded_even_when_opted_in() {
 	let config =
 		surrealdb_cnf::ConfigMap::empty().with_key_value("experimental_upgrade_from_3x", "true");
 	let ds = written_by_3x(config, Some("3.3.2")).await;
 
-	let (version, is_new) = ds.check_version().await.unwrap();
-	assert_eq!(version, MajorVersion::from(MajorVersion::LEGACY));
-	assert!(!is_new);
-	assert_eq!(
-		stored_stamp(&ds).await,
-		Some(crate::kvs::version::StorageVersion::current().to_string())
+	let err = ds.check_version().await.unwrap_err();
+	assert!(
+		err.downcast_ref::<surrealdb_catalog::Error>().is_some_and(|e| {
+			matches!(e, surrealdb_catalog::Error::ForkStorageMigrationRequired { .. })
+		}),
+		"the opt-in let a 3.x store past the fork fence: {err}"
 	);
-	ds.refuse_upgrade_from_3x().await.unwrap();
+	assert_eq!(stored_major(&ds).await, Some(MajorVersion::from(MajorVersion::LEGACY)));
 }
 
 /// A datastore stamped by this line is not refused, at whatever feature level
 /// it stands.
 #[tokio::test]
 async fn a_datastore_stamped_by_this_line_is_not_refused() {
-	let ds = written_by_3x(surrealdb_cnf::ConfigMap::empty(), Some("4.0.0")).await;
+	use surrealdb_kvs::TransactionType::Write;
+
+	use crate::key::schema::StorageVersionKey;
+	use crate::kvs::version::StorageVersion;
+
+	let ds = Datastore::builder()
+		.without_maintenance_tasks()
+		.without_startup_transactions()
+		.build_with_path("memory")
+		.await
+		.unwrap();
+	let txn = ds.transaction(Write).await.unwrap();
+	txn.set_key(&VersionKey {}, &MajorVersion::latest()).await.unwrap();
+	txn.set_key(
+		&crate::key::schema::ForkStorageKey {},
+		&surrealdb_datastore::fork_storage::ForkStorageFormat::current(),
+	)
+	.await
+	.unwrap();
+	txn.set_key(&StorageVersionKey {}, &StorageVersion::parse("4.0.0").unwrap()).await.unwrap();
+	txn.commit().await.unwrap();
+
 	ds.settle_feature_level().await.unwrap();
 	assert!(ds.feature_cell().level().is_legacy());
 	ds.refuse_upgrade_from_3x().await.unwrap();
