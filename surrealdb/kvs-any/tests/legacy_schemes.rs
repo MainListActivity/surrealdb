@@ -1,5 +1,7 @@
-//! The `rocksdb` and `indxdb` schemes of earlier storage engines open the same
-//! path with SurrealKV.
+//! The `indxdb` scheme of an earlier storage engine opens the same path with
+//! SurrealKV. The `rocksdb` scheme is not claimed in this fork's community
+//! backends: RocksDB lives in the separately built `surrealdb-kvs-rocksdb`
+//! crate, so `rocksdb:` paths do not resolve to SurrealKV here.
 #![cfg(feature = "kv-surrealkv")]
 #![allow(clippy::unwrap_used)]
 
@@ -10,7 +12,7 @@ use tokio_util::sync::CancellationToken;
 
 #[tokio::test]
 async fn legacy_schemes_open_the_path_with_surrealkv() {
-	for scheme in ["rocksdb", "indxdb"] {
+	for scheme in ["indxdb"] {
 		let backends = surrealdb_kvs_any::Backends::community();
 		let dir = TempDir::new().unwrap();
 		let path = format!("{scheme}:{}", dir.path().to_string_lossy());
