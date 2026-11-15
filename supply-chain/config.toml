@@ -215,7 +215,7 @@ version = "0.0.11"
 criteria = "safe-to-deploy"
 
 [[exemptions.ammonia]]
-version = "4.2.4"
+version = "4.2.5"
 criteria = "safe-to-deploy"
 
 [[exemptions.android_system_properties]]
@@ -272,6 +272,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.async-lock]]
 version = "3.4.2"
+criteria = "safe-to-deploy"
+
+[[exemptions.async-recursion]]
+version = "1.2.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.async-trait]]
@@ -642,6 +646,10 @@ criteria = "safe-to-deploy"
 version = "0.5.9"
 criteria = "safe-to-deploy"
 
+[[exemptions.derive-new]]
+version = "0.7.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.derive_arbitrary]]
 version = "1.5.0"
 criteria = "safe-to-deploy"
@@ -744,6 +752,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.ext-sort]]
 version = "0.1.6"
+criteria = "safe-to-deploy"
+
+[[exemptions.fail]]
+version = "0.5.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.fastrand]]
@@ -1101,6 +1113,10 @@ criteria = "safe-to-deploy"
 [[exemptions.libtest-mimic]]
 version = "0.8.2"
 criteria = "safe-to-run"
+
+[[exemptions.libz-sys]]
+version = "1.1.33"
+criteria = "safe-to-deploy"
 
 [[exemptions.lindera]]
 version = "6.2.0"
@@ -1498,6 +1514,10 @@ criteria = "safe-to-deploy"
 version = "1.0.107"
 criteria = "safe-to-deploy"
 
+[[exemptions.prometheus]]
+version = "0.14.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.proptest]]
 version = "1.12.0"
 criteria = "safe-to-deploy"
@@ -1611,11 +1631,11 @@ version = "0.8.18"
 criteria = "safe-to-deploy"
 
 [[exemptions.rmcp]]
-version = "3.5.1"
+version = "3.10.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.rmcp-macros]]
-version = "3.5.1"
+version = "3.10.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.roaring]]
@@ -1960,6 +1980,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.surrealdb-diskann]]
 version = "0.61.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.surrealdb-tikv-client]]
+version = "0.5.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.symbol_table]]

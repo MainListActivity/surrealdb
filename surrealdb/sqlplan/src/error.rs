@@ -190,8 +190,8 @@ impl PlanError {
 			} => "42883", /* undefined_function */
 			Self::WindowFunctionWithoutOver(_) => "42809",                        /* wrong_object_type */
 			Self::SubqueryMustHaveAlias => "42601",                               // syntax_error
-			Self::ParameterOutOfRange(_) => "22023",                              // invalid_parameter_value
-			Self::DivisionByZero => "22012",                                      // division_by_zero
+			Self::ParameterOutOfRange(_) => "22023", // invalid_parameter_value
+			Self::DivisionByZero => "22012",         // division_by_zero
 			Self::NumericValueOutOfRange | Self::ValueOutOfRange(_) => "22003", /* numeric_value_out_of_range */
 			Self::InvalidTextRepresentation(_) => "22P02", // invalid_text_representation
 			Self::UnsupportedStatement(_) | Self::UnsupportedExpression(_) => "0A000", /* feature_not_supported */
@@ -254,15 +254,15 @@ impl PlanError {
 			Self::UnsupportedStatement(_) | Self::UnsupportedExpression(_) => 1235, /* ER_NOT_SUPPORTED_YET */
 			Self::NoActiveTransaction => 1105,                                      /* ER_UNKNOWN_ERROR */
 			Self::InFailedTransaction => 1105,                                      /* ER_UNKNOWN_ERROR */
-			Self::SavepointDoesNotExist(_) => 1305,                                 // ER_SP_DOES_NOT_EXIST
-			Self::ActiveTransactionAlreadyInProgress => 1105,                       // ER_UNKNOWN_ERROR
-			Self::UndefinedObject(_) => 1193, // ER_UNKNOWN_SYSTEM_VARIABLE
+			Self::SavepointDoesNotExist(_) => 1305, // ER_SP_DOES_NOT_EXIST
+			Self::ActiveTransactionAlreadyInProgress => 1105, // ER_UNKNOWN_ERROR
+			Self::UndefinedObject(_) => 1193,       // ER_UNKNOWN_SYSTEM_VARIABLE
 			Self::UndefinedConstraint {
 				..
 			} => 1091, // ER_CANT_DROP_FIELD_OR_KEY
 			Self::InvalidParameterValue(_) => 1210, // ER_WRONG_ARGUMENTS
-			Self::DatatypeMismatch(_) => 1366, // ER_TRUNCATED_WRONG_VALUE_FOR_FIELD
-			Self::DuplicateColumn(_) => 1060, // ER_DUP_FIELDNAME
+			Self::DatatypeMismatch(_) => 1366,      // ER_TRUNCATED_WRONG_VALUE_FOR_FIELD
+			Self::DuplicateColumn(_) => 1060,       // ER_DUP_FIELDNAME
 			Self::UndefinedType(_)
 			| Self::UndefinedDomainConstraint {
 				..
