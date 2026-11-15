@@ -207,6 +207,10 @@ async fn implicit_creation_over_existing_tables_takes_level_3() {
 	let (ns, db) = (NamespaceId(41), DatabaseId(42));
 	let txn = ds.transaction(Write).await.unwrap();
 	assert_eq!(txn.implicit_compatibility(ns, db).await.unwrap(), LEVEL_4);
+	// The quota fence refuses catalog-key writes into a database whose usage
+	// ledger is uninitialized; a database ids hold table rows stands in for
+	// one an earlier release defined, which carries a ready ledger.
+	txn.quota_usage(ns, db).initialize_new_database().await.unwrap();
 	let table = TableDefinition::from_stored(&StoredTableDefinition::new(
 		ns,
 		db,

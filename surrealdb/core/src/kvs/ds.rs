@@ -2672,7 +2672,20 @@ impl Datastore {
 	async fn check_quota_storage_identity(&self) -> Result<()> {
 		let tx = self.transaction(Read).await?;
 		let version = tx.get_key(&VersionKey {}, None).await?;
-		let marker = tx.get_key(&ForkStorageKey {}, None).await?;
+		// Decode the marker from raw bytes so bytes this build cannot read
+		// are refused as an incompatible fork store rather than surfacing a
+		// bare decode failure.
+		let marker = tx
+			.get_key_raw(&ForkStorageKey {}, None)
+			.await?
+			.map(|raw| {
+				<ForkStorageFormat as KVValue>::kv_decode_value(&raw, ()).map_err(|error| {
+					anyhow::Error::new(surrealdb_catalog::Error::ForkStorageFormatIncompatible {
+						reason: format!("fork storage format marker cannot be decoded: {error}"),
+					})
+				})
+			})
+			.transpose()?;
 		let migration = tx.get_key(&NativeQuotaMigrationKey {}, None).await?;
 		tx.cancel().await?;
 		if migration.is_some() {
@@ -2683,16 +2696,18 @@ impl Datastore {
 		}
 		match (version, marker) {
 			(None, None) => Ok(()),
-			(Some(version), Some(marker)) if version == MajorVersion::latest() => marker.validate(),
 			(Some(version), _) if version != MajorVersion::latest() => {
 				bail!(surrealdb_catalog::Error::ForkStorageMigrationRequired {
 					actual: version.into()
 				})
 			}
-			_ => bail!(surrealdb_catalog::Error::ForkStorageFormatIncompatible {
-				reason: "fork-required version and storage marker must be present together"
-					.to_owned(),
+			(Some(_), None) => bail!(surrealdb_catalog::Error::ForkStorageFormatIncompatible {
+				reason: "the fork storage format marker is missing".to_owned(),
 			}),
+			(None, Some(_)) => bail!(surrealdb_catalog::Error::ForkStorageFormatIncompatible {
+				reason: "the fork-required storage version is missing".to_owned(),
+			}),
+			(Some(_), Some(marker)) => marker.validate(),
 		}
 	}
 

@@ -101,6 +101,9 @@ impl From<std::num::TryFromIntError> for Error {
 }
 
 impl From<rocksdb::Error> for Error {
+	// The mapping covers Busy/TryAgain and treats every other ErrorKind
+	// uniformly, so the catch-all arm is intentional.
+	#[allow(clippy::wildcard_enum_match_arm)]
 	fn from(e: rocksdb::Error) -> Error {
 		// Strip trailing colon/whitespace; rocksdb's Status::Busy renders as "Resource busy: " with
 		// an empty tail.
