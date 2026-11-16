@@ -22,6 +22,11 @@ pub struct RestClient {
 impl RestClient {
 	pub fn new(ns: &str, db: &str, user: &str, pass: &str, port: u16) -> Self {
 		let mut headers = HeaderMap::new();
+		// Servers select the session's namespace and database from the
+		// `surreal-ns`/`surreal-db` headers; the pre-2.0 `NS`/`DB` spellings go
+		// alongside them so the client still talks to every released version.
+		headers.insert("surreal-ns", ns.parse().unwrap());
+		headers.insert("surreal-db", db.parse().unwrap());
 		headers.insert("NS", ns.parse().unwrap());
 		headers.insert("DB", db.parse().unwrap());
 		headers.insert(header::ACCEPT, "application/json".parse().unwrap());
