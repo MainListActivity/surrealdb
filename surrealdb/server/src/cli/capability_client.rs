@@ -44,20 +44,36 @@ async fn fetch_capabilities(endpoint: &str) -> Result<CapabilityDocument> {
 }
 
 fn endpoint_url(endpoint: &str, path: &str) -> Result<Url> {
-	let mut url = Url::parse(endpoint).context("remote endpoint is not a valid URL")?;
+	let mut parsed = Url::parse(endpoint).context("remote endpoint is not a valid URL")?;
 	// The server multiplexes its transports on one listener, so the public
 	// HTTP routes the preflight needs sit behind the websocket and gRPC
 	// endpoint schemes as well.
-	let replacement = match url.scheme() {
+	let replacement = match parsed.scheme() {
 		"ws" | "grpc" => Some("http"),
 		"wss" | "grpcs" => Some("https"),
 		"http" | "https" => None,
 		scheme => bail!("endpoint scheme '{scheme}' does not support remote capability preflight"),
 	};
-	if let Some(replacement) = replacement {
-		url.set_scheme(replacement)
-			.map_err(|_| anyhow::anyhow!("unable to map websocket endpoint to HTTP"))?;
-	}
+	let mut url = match replacement {
+		// `Url::set_scheme` refuses to move a URL between a non-special
+		// scheme (`grpc`, `grpcs`) and a special one (`http`, `https`), so
+		// the scheme is swapped textually, as the SDK's gRPC connector does.
+		Some(scheme) if parsed.scheme() != "ws" && parsed.scheme() != "wss" => {
+			let rest = endpoint
+				.split_once("://")
+				.map(|(_, rest)| rest)
+				.context("remote endpoint is not a valid URL")?;
+			Url::parse(&format!("{scheme}://{rest}"))
+				.context("remote endpoint is not a valid URL")?
+		}
+		Some(scheme) => {
+			parsed
+				.set_scheme(scheme)
+				.map_err(|_| anyhow::anyhow!("unable to map websocket endpoint to HTTP"))?;
+			parsed
+		}
+		None => parsed,
+	};
 	url.set_path(path);
 	url.set_query(None);
 	url.set_fragment(None);
