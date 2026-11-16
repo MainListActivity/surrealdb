@@ -1,0 +1,178 @@
+name: Native quota binary artifacts
+
+# Manual fast path for the binaries downstream deployments actually run:
+# linux amd64/arm64 and Apple-silicon macOS. Unlike the candidate pipeline
+# this does not wait on a green full CI run, does not build the OCI image,
+# and does not enter the promotion chain; the output is a signed GitHub
+# pre-release with the same artifact layout the candidate publishes.
+
+on:
+  workflow_dispatch:
+    inputs:
+      git_ref:
+        description: 'Exact commit or releases/sck-* ref to package'
+        required: true
+        default: 'releases/sck-4.0'
+
+permissions: read
+
+jobs:
+  resolve:
+    name: Resolve release metadata
+    runs-on: ubuntu-latest
+    outputs:
+      release: ${{ steps.metadata.outputs.release }}
+      git_sha: ${{ steps.metadata.outputs.git_sha }}
+      tag: ${{ steps.metadata.outputs.tag }}
+    steps:
+      - name: Harden the runner
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout ref
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.git_ref }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Read manifest and compute tag
+        id: metadata
+        run: |
+          set -euo pipefail
+          release="$(jq -er '.fork_release' compatibility/native-quota-v1.json)"
+          sha="$(git rev-parse HEAD)"
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+          echo "git_sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "tag=sck-${release}-artifacts.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+
+  build-linux:
+    name: Build Linux CLI (${{ matrix.platform }})
+    needs: resolve
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64-unknown-linux-gnu
+            platform: amd64
+            runner: ${{ github.repository == 'surrealdb/surrealdb' && 'runner-amd-32-cores' || 'ubuntu-24.04' }}
+          - arch: aarch64-unknown-linux-gnu
+            platform: arm64
+            runner: ${{ github.repository == 'surrealdb/surrealdb' && 'runner-arm-32-cores' || 'ubuntu-24.04-arm' }}
+    steps:
+      - name: Harden the runner
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout ref
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ needs.resolve.outputs.git_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Build release CLI
+        uses: ./.github/actions/build-linux
+        with:
+          arch: ${{ matrix.arch }}
+          platform: ${{ matrix.platform }}
+          name: native-quota
+          version-override: ${{ needs.resolve.outputs.release }}
+          build-metadata: sha.${{ needs.resolve.outputs.git_sha }}
+          git-sha: ${{ needs.resolve.outputs.git_sha }}
+          extra-features: jwks,ml
+          upload: true
+          release: true
+          profile: release-thin
+
+  build-darwin:
+    name: Build macOS CLI (arm64)
+    needs: resolve
+    runs-on: macos-15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout ref
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ needs.resolve.outputs.git_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: ./.github/actions/setup-environment
+        with:
+          toolchain: stable
+
+      - name: Build release CLI
+        uses: ./.github/actions/build-macos
+        with:
+          arch: aarch64-apple-darwin
+          platform: arm64
+          name: native-quota
+          version-override: ${{ needs.resolve.outputs.release }}
+          build-metadata: sha.${{ needs.resolve.outputs.git_sha }}
+          extra-features: jwks,ml
+          upload: true
+          release: true
+
+  publish:
+    name: Sign and publish artifacts
+    needs:
+      - resolve
+      - build-linux
+      - build-darwin
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - name: Harden the runner
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@018f2f1894f2ebeb126b74e561783b5d9cdcaee7 # v7.0.0
+        with:
+          pattern: surreal-native-quota.*
+          path: artifacts
+          merge-multiple: true
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v3.0.6
+
+      - name: Sign archives
+        run: |
+          set -euo pipefail
+          while IFS= read -r archive; do
+            cosign sign-blob --yes --bundle "${archive}.sigstore.json" "$archive"
+          done < <(find artifacts -type f -name '*.tgz' -print | sort)
+
+      - name: Publish signed GitHub pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+          SHA: ${{ needs.resolve.outputs.git_sha }}
+        run: |
+          set -euo pipefail
+          find artifacts -type f \( -name '*.tgz' -o -name '*.txt' -o -name '*.sigstore.json' \) -print0 |
+            xargs -0 cp -t .
+          gh release create "$TAG" \
+            --target "$SHA" \
+            --prerelease \
+            --title "$TAG" \
+            --notes "Native quota binaries built by the manual artifacts workflow (linux amd64/arm64, macOS arm64). Not promoted through the candidate pipeline." \
+            surreal-native-quota.linux-*.tgz \
+            surreal-native-quota.linux-*.txt \
+            surreal-native-quota.linux-*.sigstore.json \
+            surreal-native-quota.darwin-*.tgz \
+            surreal-native-quota.darwin-*.txt \
+            surreal-native-quota.darwin-*.sigstore.json
