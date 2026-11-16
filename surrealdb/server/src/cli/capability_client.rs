@@ -45,9 +45,12 @@ async fn fetch_capabilities(endpoint: &str) -> Result<CapabilityDocument> {
 
 fn endpoint_url(endpoint: &str, path: &str) -> Result<Url> {
 	let mut url = Url::parse(endpoint).context("remote endpoint is not a valid URL")?;
+	// The server multiplexes its transports on one listener, so the public
+	// HTTP routes the preflight needs sit behind the websocket and gRPC
+	// endpoint schemes as well.
 	let replacement = match url.scheme() {
-		"ws" => Some("http"),
-		"wss" => Some("https"),
+		"ws" | "grpc" => Some("http"),
+		"wss" | "grpcs" => Some("https"),
 		"http" | "https" => None,
 		scheme => bail!("endpoint scheme '{scheme}' does not support remote capability preflight"),
 	};
@@ -73,6 +76,14 @@ mod tests {
 		);
 		assert_eq!(
 			endpoint_url("wss://db.example.com/rpc?x=1", "/ready").unwrap().as_str(),
+			"https://db.example.com/ready"
+		);
+		assert_eq!(
+			endpoint_url("grpc://localhost:8000", "/capabilities").unwrap().as_str(),
+			"http://localhost:8000/capabilities"
+		);
+		assert_eq!(
+			endpoint_url("grpcs://db.example.com", "/ready").unwrap().as_str(),
 			"https://db.example.com/ready"
 		);
 	}

@@ -14,10 +14,10 @@ backend = ["mem", "surrealkv"]
 versioned = true
 
 [[test.results]]
-value = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, compatibility: 4, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, types: {  }, users: {  } }"
+value = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, compatibility: 4, configs: {  }, extensions: {  }, functions: {  }, models: {  }, params: {  }, quota: { defined: false, generation: NONE }, sequences: {  }, tables: {  }, types: {  }, users: {  } }"
 
 [[test.results]]
-value = "{ accesses: {  }, databases: {  }, users: {  } }"
+value = "{ accesses: {  }, buckets: {  }, databases: {  }, users: {  } }"
 
 */
 
