@@ -14,8 +14,7 @@ on:
         required: true
         default: 'releases/sck-4.0'
 
-permissions:
-  contents: read
+permissions: read
 
 jobs:
   resolve:
