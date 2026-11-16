@@ -1779,10 +1779,19 @@ mod cli_integration {
 		})
 		.await
 		.unwrap();
-		let args = format!(
-			"sql --endpoint http://{addr} --user {USER} --pass {PASS} --ns acme --db prod --hide-welcome"
-		);
-		let output = common::run(&args).input("SELECT * FROM hi;\n").output().expect("success");
+		// The remote CLI refuses uncertified quota backends before connecting;
+		// surrealkv is not quota-certified, so the read goes over the HTTP SQL
+		// endpoint instead.
+		let port =
+			addr.rsplit(':').next().expect("server address has a port").parse().expect("port");
+		let client = common::rest_client::RestClient::new("acme", "prod", USER, PASS, port);
+		let output = client
+			.query("SELECT * FROM hi;")
+			.await
+			.expect("sql response")
+			.text()
+			.await
+			.expect("sql body");
 		assert!(output.contains("hello"), "the imported record is missing: {output}");
 		second.finish().unwrap();
 	}
