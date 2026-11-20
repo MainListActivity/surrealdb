@@ -932,7 +932,7 @@ jobs:
         uses: ./.github/actions/install-tools
 
       - name: Install cargo-machete
-        run: cargo install --locked cargo-machete
+        run: cargo install --locked cargo-machete@0.9.1
 
       - name: Check unused dependencies
         run: cargo make ci-unused-deps
