@@ -1,30 +1,50 @@
+use surrealdb_datastore::quota::QuotaUsageSnapshot;
+use surrealdb_kvs::TransactionType;
+use surrealdb_kvs::key::KVKey;
+use surrealdb_strand::TableName;
+use surrealdb_types::Value as PublicValue;
+
 use crate::catalog::QuotaUsageState;
 use crate::catalog::providers::DatabaseProvider;
 use crate::dbs::Session;
-use crate::key::database::qub::QuotaTableBucket;
-use crate::key::database::qur::QuotaRecordUsage;
-use crate::kvs::quota::QuotaUsageSnapshot;
-use crate::kvs::{Datastore, KVKey, LockType, TransactionType};
-use crate::types::PublicValue;
-use crate::val::TableName;
+use crate::key::schema::{QuotaRecordUsageKey, QuotaTableBucketKey};
+use crate::kvs::Datastore;
 
-async fn setup() -> (Datastore, crate::catalog::NamespaceId, crate::catalog::DatabaseId) {
-	let ds = Datastore::new("memory").await.unwrap();
+async fn setup()
+-> (std::sync::Arc<Datastore>, crate::catalog::NamespaceId, crate::catalog::DatabaseId) {
+	let ds = Datastore::builder()
+		.without_maintenance_tasks()
+		.build_with_path("memory")
+		.await
+		.expect("quota fixture operation must succeed");
 	let root = Session::owner();
 	let namespace_owner = Session::owner().with_ns("tenant");
-	ds.execute("DEFINE NAMESPACE tenant", &root, None).await.unwrap();
-	ds.execute("DEFINE DATABASE app", &namespace_owner, None).await.unwrap();
+	ds.execute("DEFINE NAMESPACE tenant", &root, None)
+		.await
+		.expect("quota fixture operation must succeed");
+	ds.execute("DEFINE DATABASE app", &namespace_owner, None)
+		.await
+		.expect("quota fixture operation must succeed");
 
-	let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await.unwrap();
-	let db = tx.get_db_by_name("tenant", "app", None).await.unwrap().unwrap();
+	let tx =
+		ds.transaction(TransactionType::Read).await.expect("quota fixture operation must succeed");
+	let db = tx
+		.get_db_by_name("tenant", "app", None)
+		.await
+		.expect("quota fixture operation must succeed")
+		.expect("quota fixture operation must succeed");
 	let ids = (db.namespace_id, db.database_id);
-	tx.cancel().await.unwrap();
+	tx.cancel().await.expect("quota fixture operation must succeed");
 	(ds, ids.0, ids.1)
 }
 
 async fn statement_error(ds: &Datastore, sql: &str, session: &Session) -> String {
 	match ds.execute(sql, session, None).await {
-		Ok(mut responses) => responses.remove(responses.len() - 1).result.unwrap_err().to_string(),
+		Ok(mut responses) => responses
+			.remove(responses.len() - 1)
+			.result
+			.expect_err("quota fixture operation must fail")
+			.to_string(),
 		Err(error) => error.to_string(),
 	}
 }
@@ -32,7 +52,7 @@ async fn statement_error(ds: &Datastore, sql: &str, session: &Session) -> String
 #[tokio::test]
 async fn new_database_starts_with_ready_empty_usage_ledger() {
 	let (ds, ns, db) = setup().await;
-	let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await.unwrap();
+	let tx = ds.transaction(TransactionType::Read).await.unwrap();
 	let quota = tx.quota_usage(ns, db);
 	let meta = quota.meta().await.unwrap();
 
@@ -57,7 +77,7 @@ async fn relation_redefinition_keeps_implicit_field_usage_consistent() {
 		.remove(0)
 		.result
 		.unwrap();
-	let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await.unwrap();
+	let tx = ds.transaction(TransactionType::Read).await.unwrap();
 	assert_eq!(tx.quota_usage(ns, db).field_count(&table).await.unwrap(), 0);
 	assert_eq!(tx.scan_quota_usage(ns, db).await.unwrap().fields, 0);
 	tx.cancel().await.unwrap();
@@ -85,7 +105,7 @@ async fn relation_redefinition_keeps_implicit_field_usage_consistent() {
 		.result
 		.unwrap();
 
-	let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await.unwrap();
+	let tx = ds.transaction(TransactionType::Read).await.unwrap();
 	assert_eq!(tx.quota_usage(ns, db).field_count(&table).await.unwrap(), 0);
 	tx.cancel().await.unwrap();
 }
@@ -98,27 +118,36 @@ async fn usage_counter_and_business_kv_share_commit_cancel_and_savepoint_boundar
 	let cancelled_key = b"quota-test/cancelled".to_vec();
 	let savepoint_key = b"quota-test/savepoint".to_vec();
 
-	let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
-	tx.set(&committed_key, &b"yes".to_vec()).await.unwrap();
+	let tx = ds.transaction(TransactionType::Write).await.unwrap();
+	tx.set(surrealdb_kvs::Key::from(committed_key.as_slice()), b"yes".to_vec()).await.unwrap();
 	tx.quota_usage(ns, db).increment_record_count(&table, 1).await.unwrap();
 	tx.commit().await.unwrap();
 
-	let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
-	tx.set(&cancelled_key, &b"no".to_vec()).await.unwrap();
+	let tx = ds.transaction(TransactionType::Write).await.unwrap();
+	tx.set(surrealdb_kvs::Key::from(cancelled_key.as_slice()), b"no".to_vec()).await.unwrap();
 	tx.quota_usage(ns, db).increment_record_count(&table, 2).await.unwrap();
 	tx.cancel().await.unwrap();
 
-	let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
+	let tx = ds.transaction(TransactionType::Write).await.unwrap();
 	tx.new_save_point().await.unwrap();
-	tx.set(&savepoint_key, &b"no".to_vec()).await.unwrap();
+	tx.set(surrealdb_kvs::Key::from(savepoint_key.as_slice()), b"no".to_vec()).await.unwrap();
 	tx.quota_usage(ns, db).increment_record_count(&table, 4).await.unwrap();
 	tx.rollback_to_save_point().await.unwrap();
 	tx.commit().await.unwrap();
 
-	let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await.unwrap();
-	assert_eq!(tx.get(&committed_key, None).await.unwrap(), Some(b"yes".to_vec()));
-	assert_eq!(tx.get(&cancelled_key, None).await.unwrap(), None);
-	assert_eq!(tx.get(&savepoint_key, None).await.unwrap(), None);
+	let tx = ds.transaction(TransactionType::Read).await.unwrap();
+	assert_eq!(
+		tx.get(surrealdb_kvs::Key::from(committed_key.as_slice()), None).await.unwrap(),
+		Some(b"yes".to_vec())
+	);
+	assert_eq!(
+		tx.get(surrealdb_kvs::Key::from(cancelled_key.as_slice()), None).await.unwrap(),
+		None
+	);
+	assert_eq!(
+		tx.get(surrealdb_kvs::Key::from(savepoint_key.as_slice()), None).await.unwrap(),
+		None
+	);
 	assert_eq!(tx.quota_usage(ns, db).record_count(&table).await.unwrap(), 1);
 	tx.cancel().await.unwrap();
 }
@@ -130,14 +159,15 @@ async fn staged_rebuild_remains_fenced_until_validated_epoch_switch_commits() {
 	let database_owner = Session::owner().with_ns("tenant").with_db("app");
 	ds.execute("DEFINE TABLE user", &database_owner, None).await.unwrap().remove(0).result.unwrap();
 
-	let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
+	let tx = ds.transaction(TransactionType::Write).await.unwrap();
 	let quota = tx.quota_usage(ns, db);
 	quota.increment_record_count(&table, 3).await.unwrap();
 	quota.increment_field_count(&table, 4).await.unwrap();
 	quota.increment_table_bucket_count(7, "ent-tables", 1).await.unwrap();
 	tx.commit().await.unwrap();
+	drop(tx);
 
-	let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
+	let tx = ds.transaction(TransactionType::Write).await.unwrap();
 	let quota = tx.quota_usage(ns, db);
 	let staged_epoch = quota.begin_rebuild().await.unwrap();
 	assert_eq!(staged_epoch, 2);
@@ -145,6 +175,7 @@ async fn staged_rebuild_remains_fenced_until_validated_epoch_switch_commits() {
 	quota.set_staged_field_count(&table, 10).await.unwrap();
 	quota.set_staged_table_bucket_count(7, "ent-tables", 2).await.unwrap();
 	tx.commit().await.unwrap();
+	drop(tx);
 
 	let error = statement_error(&ds, "CREATE user:one SET name = 'blocked'", &database_owner).await;
 	assert!(error.contains("ledger is rebuilding"), "{error}");
@@ -157,7 +188,7 @@ async fn staged_rebuild_remains_fenced_until_validated_epoch_switch_commits() {
 	ds.execute("INFO FOR DB", &database_owner, None).await.unwrap().remove(0).result.unwrap();
 
 	// A failed activation transaction must leave the active epoch and fence unchanged.
-	let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
+	let tx = ds.transaction(TransactionType::Write).await.unwrap();
 	let quota = tx.quota_usage(ns, db);
 	let mut expected = QuotaUsageSnapshot::default();
 	expected.set_record_count(&table, 9);
@@ -167,8 +198,12 @@ async fn staged_rebuild_remains_fenced_until_validated_epoch_switch_commits() {
 	quota.activate_validated_epoch(validated).await.unwrap();
 	tx.cancel().await.unwrap();
 
-	let ds = ds.restart();
-	let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await.unwrap();
+	drop(tx);
+	let ds = std::sync::Arc::try_unwrap(ds)
+		.ok()
+		.expect("all datastore handles released before restart")
+		.restart();
+	let tx = ds.transaction(TransactionType::Read).await.unwrap();
 	let quota = tx.quota_usage(ns, db);
 	let meta = quota.meta().await.unwrap();
 	assert_eq!(meta.state, QuotaUsageState::Rebuilding);
@@ -180,14 +215,14 @@ async fn staged_rebuild_remains_fenced_until_validated_epoch_switch_commits() {
 		statement_error(&ds, "CREATE user:one SET name = 'still blocked'", &database_owner).await;
 	assert!(error.contains("ledger is rebuilding"), "{error}");
 
-	let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
+	let tx = ds.transaction(TransactionType::Write).await.unwrap();
 	let quota = tx.quota_usage(ns, db);
 	let validated = quota.validate_staged_epoch(&expected).await.unwrap();
 	quota.activate_validated_epoch(validated).await.unwrap();
 	quota.clear_inactive_epoch(1).await.unwrap();
 	tx.commit().await.unwrap();
 
-	let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await.unwrap();
+	let tx = ds.transaction(TransactionType::Read).await.unwrap();
 	let quota = tx.quota_usage(ns, db);
 	let meta = quota.meta().await.unwrap();
 	assert_eq!(meta.state, QuotaUsageState::Ready);
@@ -212,21 +247,24 @@ async fn external_write_maintenance_fences_before_raw_install_until_rebuild() {
 
 	// A quota-aware restore/copy tool commits the fence before installing any
 	// external bytes. The raw install itself intentionally bypasses the facade.
-	let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
+	let tx = ds.transaction(TransactionType::Write).await.unwrap();
 	tx.quota_usage(ns, db).begin_external_write_maintenance().await.unwrap();
 	tx.commit().await.unwrap();
 	let restored_key = b"raw-restore/business-key".to_vec();
-	let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
-	tx.set(&restored_key, &b"restored".to_vec()).await.unwrap();
+	let tx = ds.transaction(TransactionType::Write).await.unwrap();
+	tx.set(surrealdb_kvs::Key::from(restored_key.as_slice()), b"restored".to_vec()).await.unwrap();
 	tx.commit().await.unwrap();
 
 	let error = statement_error(&ds, "CREATE user:one", &database_owner).await;
 	assert!(error.contains("ledger is uninitialized"), "{error}");
-	let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await.unwrap();
+	let tx = ds.transaction(TransactionType::Read).await.unwrap();
 	let meta = tx.quota_usage(ns, db).meta().await.unwrap();
 	assert_eq!(meta.state, QuotaUsageState::Uninitialized);
 	assert_eq!(meta.active_epoch, None);
-	assert_eq!(tx.get(&restored_key, None).await.unwrap(), Some(b"restored".to_vec()));
+	assert_eq!(
+		tx.get(surrealdb_kvs::Key::from(restored_key.as_slice()), None).await.unwrap(),
+		Some(b"restored".to_vec())
+	);
 	tx.cancel().await.unwrap();
 }
 
@@ -235,7 +273,7 @@ async fn corrupt_usage_state_fences_writes_but_allows_rebuild_recovery() {
 	let (ds, ns, db) = setup().await;
 	let database_owner = Session::owner().with_ns("tenant").with_db("app");
 
-	let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
+	let tx = ds.transaction(TransactionType::Write).await.unwrap();
 	tx.quota_usage(ns, db).mark_corrupt().await.unwrap();
 	tx.commit().await.unwrap();
 
@@ -243,7 +281,7 @@ async fn corrupt_usage_state_fences_writes_but_allows_rebuild_recovery() {
 	assert!(error.contains("ledger is corrupt"), "{error}");
 	ds.execute("INFO FOR DB", &database_owner, None).await.unwrap().remove(0).result.unwrap();
 
-	let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
+	let tx = ds.transaction(TransactionType::Write).await.unwrap();
 	let staged = tx.quota_usage(ns, db).begin_rebuild().await.unwrap();
 	assert_eq!(staged, 2);
 	tx.commit().await.unwrap();
@@ -265,7 +303,7 @@ async fn rebuilding_database_rejects_parent_scoped_policy_mutation() {
 	.result
 	.unwrap();
 
-	let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
+	let tx = ds.transaction(TransactionType::Write).await.unwrap();
 	tx.quota_usage(ns, db).begin_rebuild().await.unwrap();
 	tx.commit().await.unwrap();
 
@@ -288,7 +326,7 @@ async fn counter_release_is_atomic_and_never_underflows() {
 	let (ds, ns, db) = setup().await;
 	let table = TableName::from("ent_user");
 
-	let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
+	let tx = ds.transaction(TransactionType::Write).await.unwrap();
 	let quota = tx.quota_usage(ns, db);
 	quota.increment_record_count(&table, 5).await.unwrap();
 	quota.increment_field_count(&table, 4).await.unwrap();
@@ -298,18 +336,29 @@ async fn counter_release_is_atomic_and_never_underflows() {
 	quota.decrement_table_bucket_count(1, "ent", 1).await.unwrap();
 	tx.commit().await.unwrap();
 
-	let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
+	let tx = ds.transaction(TransactionType::Write).await.unwrap();
 	let error = tx.quota_usage(ns, db).decrement_record_count(&table, 4).await.unwrap_err();
 	assert!(error.to_string().contains("counter underflow"), "{error}");
 	tx.cancel().await.unwrap();
 
-	let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await.unwrap();
+	let tx = ds.transaction(TransactionType::Read).await.unwrap();
 	let quota = tx.quota_usage(ns, db);
 	assert_eq!(quota.record_count(&table).await.unwrap(), 3);
 	assert_eq!(quota.field_count(&table).await.unwrap(), 3);
 	assert_eq!(quota.table_bucket_count(1, "ent").await.unwrap(), 0);
 	assert_eq!(
-		tx.get(&QuotaTableBucket::new(ns, db, 1, 1, "ent"), None).await.unwrap(),
+		tx.get_key(
+			&QuotaTableBucketKey {
+				ns,
+				db,
+				epoch: 1,
+				generation: 1,
+				rule: "ent".into()
+			},
+			None
+		)
+		.await
+		.unwrap(),
 		None,
 		"zero-valued counters must be physically removed"
 	);
@@ -320,8 +369,8 @@ async fn counter_release_is_atomic_and_never_underflows() {
 async fn competing_counter_updates_use_backend_conditional_writes() {
 	let (ds, ns, db) = setup().await;
 	let table = TableName::from("user");
-	let first = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
-	let second = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
+	let first = ds.transaction(TransactionType::Write).await.unwrap();
+	let second = ds.transaction(TransactionType::Write).await.unwrap();
 
 	first.quota_usage(ns, db).increment_record_count(&table, 1).await.unwrap();
 	second.quota_usage(ns, db).increment_record_count(&table, 1).await.unwrap();
@@ -333,7 +382,7 @@ async fn competing_counter_updates_use_backend_conditional_writes() {
 		"exactly one competing conditional counter update must commit"
 	);
 
-	let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await.unwrap();
+	let tx = ds.transaction(TransactionType::Read).await.unwrap();
 	assert_eq!(tx.quota_usage(ns, db).record_count(&table).await.unwrap(), 1);
 	tx.cancel().await.unwrap();
 }
@@ -342,8 +391,8 @@ async fn competing_counter_updates_use_backend_conditional_writes() {
 async fn active_counter_writer_conflicts_with_concurrent_rebuild_fence() {
 	let (ds, ns, db) = setup().await;
 	let table = TableName::from("user");
-	let writer = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
-	let maintenance = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
+	let writer = ds.transaction(TransactionType::Write).await.unwrap();
+	let maintenance = ds.transaction(TransactionType::Write).await.unwrap();
 
 	writer.quota_usage(ns, db).increment_record_count(&table, 1).await.unwrap();
 	assert_eq!(maintenance.quota_usage(ns, db).begin_rebuild().await.unwrap(), 2);
@@ -353,7 +402,7 @@ async fn active_counter_writer_conflicts_with_concurrent_rebuild_fence() {
 		"a counter writer that observed Ready must conflict with the committed rebuild fence"
 	);
 
-	let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await.unwrap();
+	let tx = ds.transaction(TransactionType::Read).await.unwrap();
 	let quota = tx.quota_usage(ns, db);
 	assert_eq!(quota.meta().await.unwrap().state, QuotaUsageState::Rebuilding);
 	assert_eq!(quota.record_count(&table).await.unwrap(), 0);
@@ -364,12 +413,12 @@ async fn active_counter_writer_conflicts_with_concurrent_rebuild_fence() {
 async fn staged_counter_writer_conflicts_with_concurrent_epoch_activation() {
 	let (ds, ns, db) = setup().await;
 	let table = TableName::from("user");
-	let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
+	let tx = ds.transaction(TransactionType::Write).await.unwrap();
 	assert_eq!(tx.quota_usage(ns, db).begin_rebuild().await.unwrap(), 2);
 	tx.commit().await.unwrap();
 
-	let writer = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
-	let activation = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
+	let writer = ds.transaction(TransactionType::Write).await.unwrap();
+	let activation = ds.transaction(TransactionType::Write).await.unwrap();
 	writer.quota_usage(ns, db).set_staged_record_count(&table, 1).await.unwrap();
 	let validated = activation
 		.quota_usage(ns, db)
@@ -383,7 +432,7 @@ async fn staged_counter_writer_conflicts_with_concurrent_epoch_activation() {
 		"a staged writer must not mutate an epoch after its validated activation commits"
 	);
 
-	let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await.unwrap();
+	let tx = ds.transaction(TransactionType::Read).await.unwrap();
 	let quota = tx.quota_usage(ns, db);
 	assert_eq!(quota.meta().await.unwrap().state, QuotaUsageState::Ready);
 	assert_eq!(quota.record_count(&table).await.unwrap(), 0);
@@ -409,7 +458,7 @@ async fn dynamic_use_target_cannot_write_through_a_maintenance_fence() {
 	.result
 	.unwrap();
 
-	let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
+	let tx = ds.transaction(TransactionType::Write).await.unwrap();
 	tx.quota_usage(ns, db).begin_rebuild().await.unwrap();
 	tx.commit().await.unwrap();
 
@@ -431,17 +480,24 @@ async fn malformed_staged_epoch_never_activates_or_opens_writes() {
 	let table = TableName::from("user");
 	let database_owner = Session::owner().with_ns("tenant").with_db("app");
 
-	let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
+	let tx = ds.transaction(TransactionType::Write).await.unwrap();
 	let staged = tx.quota_usage(ns, db).begin_rebuild().await.unwrap();
 	tx.commit().await.unwrap();
 
 	// Model a crashed/offline rebuild writer that left an undecodable staged counter.
-	let malformed_key = QuotaRecordUsage::new(ns, db, staged, &table).encode_key().unwrap();
-	let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
-	tx.set(&malformed_key, &vec![1]).await.unwrap();
+	let malformed_key = QuotaRecordUsageKey {
+		ns,
+		db,
+		epoch: staged,
+		table: std::borrow::Cow::Borrowed(&table),
+	}
+	.encode_key()
+	.unwrap();
+	let tx = ds.transaction(TransactionType::Write).await.unwrap();
+	tx.set(surrealdb_kvs::Key::from(malformed_key.as_slice()), vec![1]).await.unwrap();
 	tx.commit().await.unwrap();
 
-	let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
+	let tx = ds.transaction(TransactionType::Write).await.unwrap();
 	let error = tx
 		.quota_usage(ns, db)
 		.validate_staged_epoch(&QuotaUsageSnapshot::default())
@@ -450,7 +506,7 @@ async fn malformed_staged_epoch_never_activates_or_opens_writes() {
 	assert!(error.to_string().contains("invalid counter"), "{error}");
 	tx.cancel().await.unwrap();
 
-	let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await.unwrap();
+	let tx = ds.transaction(TransactionType::Read).await.unwrap();
 	let meta = tx.quota_usage(ns, db).meta().await.unwrap();
 	assert_eq!(meta.state, QuotaUsageState::Rebuilding);
 	assert_eq!(meta.active_epoch, Some(1));
@@ -465,7 +521,7 @@ async fn incomplete_staged_epoch_never_activates() {
 	let (ds, ns, db) = setup().await;
 	let table = TableName::from("user");
 
-	let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
+	let tx = ds.transaction(TransactionType::Write).await.unwrap();
 	let quota = tx.quota_usage(ns, db);
 	quota.begin_rebuild().await.unwrap();
 	quota.set_staged_record_count(&table, 9).await.unwrap();
@@ -474,12 +530,12 @@ async fn incomplete_staged_epoch_never_activates() {
 	let mut expected = QuotaUsageSnapshot::default();
 	expected.set_record_count(&table, 9);
 	expected.set_field_count(&table, 4);
-	let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
+	let tx = ds.transaction(TransactionType::Write).await.unwrap();
 	let error = tx.quota_usage(ns, db).validate_staged_epoch(&expected).await.unwrap_err();
 	assert!(error.to_string().contains("does not match trusted rebuild snapshot"), "{error}");
 	tx.cancel().await.unwrap();
 
-	let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await.unwrap();
+	let tx = ds.transaction(TransactionType::Read).await.unwrap();
 	let meta = tx.quota_usage(ns, db).meta().await.unwrap();
 	assert_eq!(meta.state, QuotaUsageState::Rebuilding);
 	assert_eq!(meta.active_epoch, Some(1));

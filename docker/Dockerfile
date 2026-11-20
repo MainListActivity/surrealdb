@@ -3,19 +3,31 @@
 # This stage is used to build the SurrealDB linux binary
 ###
 
-FROM docker.io/rockylinux/rockylinux:9@sha256:53f4c6dcb34e1403bd93207351f0af9a593610faeb7165cb8a037346765199b0 AS builder
+FROM docker.io/rockylinux/rockylinux:9@sha256:8101994123cf3d0a8fee517bee7f39e555c7d92bd2d9eb3303cc988a0eeed00f AS builder
 
 RUN dnf install -y gcc-toolset-13 git cmake llvm-toolset patch zlib-devel python3.11 openssl-devel \
 	&& dnf clean all
 
 ENV OPENSSL_NO_VENDOR=1
 
-# Install rust
+# Install rust. rustup-init comes from the rustup archive at a fixed version
+# and is checked against that version's published checksum for this
+# architecture, so the pin holds until RUSTUP_VERSION is changed.
 ARG RUST_VERSION=1.95.0
-ARG RUSTUP_SHA256=6c30b75a75b28a96fd913a037c8581b580080b6ee9b8169a3c0feb1af7fe8caf
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup.sh \
-    && echo "${RUSTUP_SHA256}  /tmp/rustup.sh" | sha256sum -c - \
-    && bash /tmp/rustup.sh -y --default-toolchain ${RUST_VERSION}
+ARG RUSTUP_VERSION=1.29.3
+ARG RUSTUP_INIT_SHA256_X86_64=b1c8cb14e30889e7e2999e6b69e62d9e9b9ffc0f4df8180564d306d9680e6c55
+ARG RUSTUP_INIT_SHA256_AARCH64=9f608c142e0e38a78957d0661ba1dfaf0b6fb37184cfaa4b9a0aa57af6184282
+RUN arch="$(uname -m)" \
+    && case "${arch}" in \
+        x86_64) sha="${RUSTUP_INIT_SHA256_X86_64}" ;; \
+        aarch64) sha="${RUSTUP_INIT_SHA256_AARCH64}" ;; \
+        *) echo "no rustup-init checksum for ${arch}" >&2; exit 1 ;; \
+    esac \
+    && curl --proto '=https' --tlsv1.2 -sSf --retry 3 --retry-connrefused "https://static.rust-lang.org/rustup/archive/${RUSTUP_VERSION}/${arch}-unknown-linux-gnu/rustup-init" -o /tmp/rustup-init \
+    && echo "${sha}  /tmp/rustup-init" | sha256sum -c - \
+    && chmod +x /tmp/rustup-init \
+    && /tmp/rustup-init -y --default-toolchain ${RUST_VERSION} \
+    && rm /tmp/rustup-init
 ENV PATH="/root/.cargo/bin:${PATH}"
 
 RUN rustup target add x86_64-unknown-linux-gnu
@@ -47,7 +59,7 @@ RUN apk add --no-cache tzdata
 #
 # Development image (built on the CI environment)
 #
-FROM cgr.dev/chainguard/glibc-dynamic:latest-dev@sha256:9f2379c134b72a7fdd73694db2adec6d524a35b19bc346507e9e4685abeff459 AS dev-ci
+FROM cgr.dev/chainguard/glibc-dynamic:latest-dev@sha256:051877ff31a3c83c704ebcf341d759058bbfd7e102d57883b8abb53fe0461574 AS dev-ci
 
 ARG TARGETOS
 ARG TARGETARCH
@@ -85,7 +97,7 @@ ENTRYPOINT ["/surreal"]
 #
 # Production image (built on the CI environment)
 #
-FROM cgr.dev/chainguard/glibc-dynamic:latest@sha256:0dc86136587f0ac15d61d307dcd8193e4a9880d26d2f2659b9e2b142640eecc0 AS prod-ci
+FROM cgr.dev/chainguard/glibc-dynamic:latest@sha256:3f1283dc2a6a48c25cd2e1c7730a871b19b721975240e108e0d6a73b555a3a20 AS prod-ci
 
 COPY --from=dev-ci /surreal /surreal
 
@@ -93,9 +105,11 @@ COPY --from=tzdata /usr/share/zoneinfo /usr/share/zoneinfo
 
 COPY --from=tzdata /usr/share/zoneinfo/UTC /etc/localtime
 
-COPY --from=dev-ci /data /data
+# Chainguard's `nonroot` is uid/gid 65532. COPY creates the destination directory as
+# root, so the owner is set explicitly or the volume root is unwritable by the runtime user.
+COPY --from=dev-ci --chown=65532:65532 /data /data
 
-COPY --from=dev-ci /logs /logs
+COPY --from=dev-ci --chown=65532:65532 /logs /logs
 
 USER nonroot
 
@@ -111,7 +125,7 @@ ENTRYPOINT ["/surreal"]
 #
 # Development image (built locally)
 #
-FROM cgr.dev/chainguard/glibc-dynamic:latest-dev@sha256:9f2379c134b72a7fdd73694db2adec6d524a35b19bc346507e9e4685abeff459 AS dev
+FROM cgr.dev/chainguard/glibc-dynamic:latest-dev@sha256:051877ff31a3c83c704ebcf341d759058bbfd7e102d57883b8abb53fe0461574 AS dev
 
 ARG SURREALDB_BINARY=target/release/surreal
 
@@ -146,7 +160,7 @@ ENTRYPOINT ["/surreal"]
 #
 # Production image (built locally)
 #
-FROM cgr.dev/chainguard/glibc-dynamic:latest@sha256:0dc86136587f0ac15d61d307dcd8193e4a9880d26d2f2659b9e2b142640eecc0 AS prod
+FROM cgr.dev/chainguard/glibc-dynamic:latest@sha256:3f1283dc2a6a48c25cd2e1c7730a871b19b721975240e108e0d6a73b555a3a20 AS prod
 
 COPY --from=dev /surreal /surreal
 
@@ -154,9 +168,11 @@ COPY --from=tzdata /usr/share/zoneinfo /usr/share/zoneinfo
 
 COPY --from=tzdata /usr/share/zoneinfo/UTC /etc/localtime
 
-COPY --from=dev /data /data
+# Chainguard's `nonroot` is uid/gid 65532. COPY creates the destination directory as
+# root, so the owner is set explicitly or the volume root is unwritable by the runtime user.
+COPY --from=dev --chown=65532:65532 /data /data
 
-COPY --from=dev /logs /logs
+COPY --from=dev --chown=65532:65532 /logs /logs
 
 USER nonroot
 

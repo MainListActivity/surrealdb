@@ -1,13 +1,14 @@
 use std::sync::{Arc, Mutex};
 
-use surrealdb_types::ToSql;
+use futures::future::join;
+use surrealdb_kvs::TransactionType;
+use surrealdb_types::{ToSql, Value};
 
 use crate::catalog::providers::DatabaseProvider;
-use crate::dbs::{NewPlannerStrategy, Session};
+use crate::dbs::Session;
 use crate::iam::{Level, Role};
-use crate::kvs::{Datastore, LockType, TransactionType};
+use crate::kvs::Datastore;
 use crate::observe::{ExecutionObserver, QuotaEvent, QuotaEventKind, QuotaEventOutcome};
-use crate::val::Value;
 
 #[derive(Default)]
 struct CapturingQuotaObserver {
@@ -16,17 +17,22 @@ struct CapturingQuotaObserver {
 
 impl ExecutionObserver for CapturingQuotaObserver {
 	fn on_quota_event(&self, event: &QuotaEvent) {
-		self.events.lock().unwrap().push(event.clone());
+		self.events.lock().expect("quota fixture operation must succeed").push(event.clone());
 	}
 }
 
 async fn query_value(ds: &Datastore, sql: &str, session: &Session) -> Value {
-	ds.execute(sql, session, None).await.unwrap().remove(0).result.unwrap().into()
+	ds.execute(sql, session, None)
+		.await
+		.expect("quota fixture operation must succeed")
+		.remove(0)
+		.result
+		.expect("quota fixture operation must succeed")
 }
 
 #[tokio::test]
 async fn info_for_quota_returns_canonical_text_and_stable_ready_structure() {
-	let ds = Datastore::new("memory").await.unwrap();
+	let ds = Datastore::builder().build_with_path("memory").await.unwrap();
 	let root = Session::owner();
 	let namespace_owner = Session::owner().with_ns("tenant");
 	let database_owner =
@@ -58,11 +64,12 @@ async fn info_for_quota_returns_canonical_text_and_stable_ready_structure() {
 	let text = query_value(&ds, "INFO FOR QUOTA ON DATABASE app", &namespace_owner).await;
 	assert_eq!(
 		text,
-		Value::from(
+		Value::String(
 			"DEFINE QUOTA ON DATABASE app RULE ent_fields FOR FIELD MATCH REGEX /^ent_/ \
 			 LIMIT 3 RULE ent_records FOR RECORD MATCH REGEX /^ent_/ LIMIT 2 RULE ent_tables \
 			 FOR TABLE MATCH REGEX /^ent_/ LIMIT 2 RULE exact_records FOR RECORD MATCH EXACT \
 			 ent_user LIMIT UNLIMITED"
+				.to_owned()
 		)
 	);
 
@@ -112,7 +119,7 @@ async fn info_for_quota_returns_canonical_text_and_stable_ready_structure() {
 
 #[tokio::test]
 async fn database_info_hides_zero_generation_without_quota_policy() {
-	let ds = Datastore::new("memory").await.unwrap();
+	let ds = Datastore::builder().build_with_path("memory").await.unwrap();
 	let root = Session::owner();
 	let namespace_owner = Session::owner().with_ns("tenant");
 	let database_owner =
@@ -137,7 +144,7 @@ async fn database_info_hides_zero_generation_without_quota_policy() {
 
 #[tokio::test]
 async fn database_owner_can_read_quota_but_untrusted_usage_is_hidden() {
-	let ds = Datastore::new("memory").await.unwrap();
+	let ds = Datastore::builder().build_with_path("memory").await.unwrap();
 	let root = Session::owner();
 	let namespace_owner = Session::owner().with_ns("tenant");
 	let database_owner =
@@ -145,7 +152,7 @@ async fn database_owner_can_read_quota_but_untrusted_usage_is_hidden() {
 	ds.execute("DEFINE NAMESPACE tenant", &root, None).await.unwrap();
 	ds.execute("DEFINE DATABASE app", &namespace_owner, None).await.unwrap();
 
-	let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
+	let tx = ds.transaction(TransactionType::Write).await.unwrap();
 	let db = tx.get_db_by_name("tenant", "app", None).await.unwrap().unwrap();
 	tx.quota_usage(db.namespace_id, db.database_id)
 		.begin_external_write_maintenance()
@@ -168,7 +175,7 @@ async fn database_owner_can_read_quota_but_untrusted_usage_is_hidden() {
 
 #[tokio::test]
 async fn streaming_executor_returns_the_same_quota_structure_contract() {
-	let ds = Datastore::new("memory").await.unwrap();
+	let ds = Datastore::builder().build_with_path("memory").await.unwrap();
 	let root = Session::owner();
 	let namespace_owner = Session::owner().with_ns("tenant");
 	ds.execute("DEFINE NAMESPACE tenant", &root, None).await.unwrap();
@@ -182,10 +189,51 @@ async fn streaming_executor_returns_the_same_quota_structure_contract() {
 	.await
 	.unwrap();
 
-	let mut streaming_owner = namespace_owner;
-	streaming_owner.new_planner_strategy = NewPlannerStrategy::AllReadOnlyStatements;
-	let structure =
-		query_value(&ds, "INFO FOR QUOTA ON DATABASE app STRUCTURE", &streaming_owner).await;
+	let (sender, receiver) = async_channel::bounded(8);
+	let job = ds
+		.run_streaming(
+			crate::kvs::QueryRequest::new(
+				"INFO FOR QUOTA ON DATABASE app STRUCTURE",
+				&namespace_owner,
+			),
+			sender,
+		)
+		.unwrap();
+	let drain = async {
+		let mut value = None;
+		let mut finished = false;
+		while let Ok(item) = receiver.recv().await {
+			match item {
+				surrealdb_rpc::QueryStreamItem::Value {
+					value: item,
+					..
+				} => value = Some(item),
+				surrealdb_rpc::QueryStreamItem::Finished {
+					error,
+					..
+				} => {
+					assert!(error.is_none(), "{error:?}");
+					finished = true;
+				}
+				other @ (surrealdb_rpc::QueryStreamItem::Rows {
+					..
+				}
+				| surrealdb_rpc::QueryStreamItem::Frame {
+					..
+				}
+				| surrealdb_rpc::QueryStreamItem::Trace {
+					..
+				}) => {
+					panic!("unexpected quota stream item: {other:?}")
+				}
+			}
+		}
+		assert!(finished, "quota stream must finish successfully");
+		value.expect("quota stream must return its structure")
+	};
+	let (result, structure) = join(job.run, drain).await;
+	result.unwrap();
+	let structure: Value = structure;
 	let Value::Object(root) = structure else {
 		panic!("expected quota structure object");
 	};

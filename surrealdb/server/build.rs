@@ -14,9 +14,9 @@ fn main() {
 	}
 	if cfg!(any(
 		feature = "storage-mem",
-		feature = "storage-tikv",
-		feature = "storage-rocksdb",
 		feature = "storage-surrealkv",
+		feature = "storage-rocksdb",
+		feature = "storage-tikv",
 	)) {
 		println!("cargo:rustc-cfg=storage");
 		println!("cargo::rustc-check-cfg=cfg(storage)");

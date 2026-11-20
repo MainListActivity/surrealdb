@@ -2,7 +2,7 @@
 
 use axum::routing::get;
 use axum::{Extension, Json, Router};
-use surrealdb_core::dbs::capabilities::RouteTarget;
+use surrealdb_rpc::capabilities::RouteTarget;
 
 use super::AppState;
 use crate::capability::CapabilityDocument;
@@ -49,7 +49,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn endpoint_document_reports_runtime_storage_without_tenant_data() {
-		let datastore = Arc::new(Datastore::new("memory").await.unwrap());
+		let datastore = Datastore::new("memory").await.unwrap();
 		datastore.check_version().await.unwrap();
 		let state = AppState {
 			client_ip: ClientIp::None,
