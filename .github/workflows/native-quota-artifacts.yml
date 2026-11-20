@@ -86,7 +86,7 @@ jobs:
           version-override: ${{ needs.resolve.outputs.release }}
           build-metadata: sha.${{ needs.resolve.outputs.git_sha }}
           git-sha: ${{ needs.resolve.outputs.git_sha }}
-          extra-features: jwks,cjk
+          extra-features: jwks,cjk,storage-rocksdb
           upload: true
           release: true
           profile: release-thin
@@ -118,7 +118,7 @@ jobs:
           name: native-quota
           version-override: ${{ needs.resolve.outputs.release }}
           build-metadata: sha.${{ needs.resolve.outputs.git_sha }}
-          extra-features: jwks,cjk
+          extra-features: jwks,cjk,storage-rocksdb
           upload: true
           release: true
 

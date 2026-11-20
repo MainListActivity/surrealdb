@@ -356,7 +356,7 @@ jobs:
           version-override: ${{ needs.source-gate.outputs.release }}
           build-metadata: sha.${{ needs.source-gate.outputs.short_sha }}
           git-sha: ${{ needs.source-gate.outputs.git_sha }}
-          extra-features: jwks,cjk
+          extra-features: jwks,cjk,storage-rocksdb
           upload: true
           release: true
           profile: release-thin
