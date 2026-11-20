@@ -1295,8 +1295,8 @@ jobs:
           # whole-workspace test compile at the default job count exhausts it
           # and the runner is killed mid-build. Upstream's 16-core runners
           # have enough headroom to keep the defaults.
-          CARGO_BUILD_JOBS: ${{ github.repository != 'surrealdb/surrealdb' && matrix.arch == 'amd' && '2' || '4' }}
-          CMAKE_BUILD_PARALLEL_LEVEL: ${{ github.repository != 'surrealdb/surrealdb' && matrix.arch == 'amd' && '2' || '4' }}
+          CARGO_BUILD_JOBS: ${{ github.repository != 'surrealdb/surrealdb' && '2' || '4' }}
+          CMAKE_BUILD_PARALLEL_LEVEL: ${{ github.repository != 'surrealdb/surrealdb' && '2' || '4' }}
         with:
           task: ci-workspace-test-archive
           toolchain: build-nightly
