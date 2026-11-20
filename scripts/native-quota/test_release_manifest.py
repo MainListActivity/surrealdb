@@ -26,7 +26,7 @@ class ReleaseManifestTests(unittest.TestCase):
             "source": {
                 "repository": "MainListActivity/surrealdb",
                 "git_sha": self.sha,
-                "stable_branch": "releases/sck-3.3",
+                "stable_branch": self.compatibility["release_supply_chain"]["stable_branch"],
                 "ci_run_url": "https://github.com/MainListActivity/surrealdb/actions/runs/1",
             },
             "fork": {

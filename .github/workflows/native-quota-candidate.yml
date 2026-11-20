@@ -14,7 +14,7 @@ on:
         description: Exact commit or releases/sck-* ref to certify
         required: true
         type: string
-        default: releases/sck-3.3
+        default: releases/sck-4.0
 
 concurrency:
   group: native-quota-candidate-${{ github.event.workflow_run.head_sha || inputs.git_ref }}
