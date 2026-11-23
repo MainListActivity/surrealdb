@@ -38,7 +38,7 @@ elif a[:2]==['release','create']:
  releases=[{'id':123,'tag_name':tag,'target_commitish':a[a.index('--target')+1],'draft':True,'assets':assets}];state.write_text(json.dumps(releases))
 elif a[:2]==['api','--paginate']:print(json.dumps(releases))
 elif a[:3]==['api','--method','PATCH']:
- assert releases and 'draft=false' in a and 'make_latest=true' in a
+ assert releases and 'draft=false' in a and 'make_latest='+str(os.environ.get('BACKEND')!='tikv').lower() in a
  releases[0]['draft']=False;state.write_text(json.dumps(releases));print('{}')
 elif a[0]=='api' and '/releases/assets/' in ' '.join(a):
  i=int(next(x for x in a if '/releases/assets/' in x).rsplit('/',1)[1]);p=uploaded/releases[0]['assets'][i-1]['name'];data=p.read_bytes()
@@ -99,7 +99,7 @@ class StableReleaseWorkflow(unittest.TestCase):
         (self.bin / 'docker').write_text('#!/bin/sh\nprintf "%s+sha.%.12s for linux on aarch64\\n" "$RELEASE" "$SHA"\n'); (self.bin / 'docker').chmod(0o755)
         (self.bin / 'tar').write_text('#!/bin/sh\nwhile [ "$1" != "-C" ]; do shift; done\nmkdir -p "$2"\nprintf \'#!/bin/bash\\nprintf "%%s+sha.%%.12s for linux on x86_64\\\\n" "$RELEASE" "$SHA"\\n\' > "$2/surreal"\nchmod +x "$2/surreal"\n'); (self.bin / 'tar').chmod(0o755)
         self.env = os.environ.copy()
-        self.env.update(PATH=str(self.bin)+':'+self.env['PATH'], MOCK_STATE=str(self.state), MOCK_UPLOADED=str(self.uploaded), MOCK_REFERENCE=str(self.reference), MOCK_EVENTS=str(self.events), GITHUB_REPOSITORY='MainListActivity/surrealdb', RELEASE='4.0.1-native-quota.1', SHA='a'*40, IMAGE_REFERENCE='ghcr.io/example@sha256:'+'b'*64, CANDIDATE_TAG='candidate')
+        self.env.update(PATH=str(self.bin)+':'+self.env['PATH'], MOCK_STATE=str(self.state), MOCK_UPLOADED=str(self.uploaded), MOCK_REFERENCE=str(self.reference), MOCK_EVENTS=str(self.events), GITHUB_REPOSITORY='MainListActivity/surrealdb', RELEASE='4.0.1-native-quota.1', BACKEND='rocksdb', SHA='a'*40, IMAGE_REFERENCE='ghcr.io/example@sha256:'+'b'*64, CANDIDATE_TAG='candidate')
         text = WORKFLOW.read_text().split('      - name: Publish and re-download verified stable release assets\n', 1)[1].split('      - name: Upload promotion receipt\n', 1)[0]
         self.step = self.work / 'step.sh'; self.step.write_text(textwrap.dedent(text.split('        run: |\n', 1)[1]))
 
@@ -120,6 +120,14 @@ class StableReleaseWorkflow(unittest.TestCase):
         result = self.run_step(MOCK_TAMPER='1')
         self.assertNotEqual(result.returncode, 0)
         self.assertTrue(json.loads(self.state.read_text())[0]['draft'])
+
+    def test_tikv_publishes_separate_release_without_changing_latest(self):
+        result = self.run_step(BACKEND='tikv')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        release = json.loads(self.state.read_text())[0]
+        self.assertFalse(release['draft'])
+        self.assertEqual(release['tag_name'], 'sck-4.0.1-native-quota.1-tikv')
+        self.assertNotIn('/releases/latest', self.events.read_text())
 
     def test_bad_signature_prevents_release_creation(self):
         result = self.run_step(MOCK_BAD_SIGNATURE='1')
