@@ -62,9 +62,15 @@ and are never overwritten. The GitHub pre-release is created last, so no
 candidate can exist when an earlier quota, backend, performance, capability,
 architecture, vulnerability, or signing gate fails.
 
+The candidate benchmark and manual CI preflight run on Linux ARM64. They
+measure the pinned, deployed RocksDB source and the candidate on the same
+runner with the same workload and thresholds, and retain both reports with
+their source identities. The historical macOS report is not a Linux baseline.
+
 Automatic builds use RocksDB. To certify a TiKV variant, manually dispatch the
 candidate workflow from the protected release branch with `backend=tikv` and
-the exact release-line SHA. The TiKV build retains RocksDB support for migration
+the exact release-line SHA. Different backends do not share a candidate queue.
+The TiKV build retains RocksDB support for migration
 tools. Its OCI release and SHA tags end in `-tikv`; its stable GitHub release
 also ends in `-tikv` and does not replace the default latest release. The
 signed manifest binds the selected backend. Runtime validation connects only to
