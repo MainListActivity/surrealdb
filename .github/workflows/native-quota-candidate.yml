@@ -297,8 +297,17 @@ jobs:
           save-cache: false
           free-disk-space: true
 
+      - name: Checkout trusted benchmark gate
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .release-gate
+          sparse-checkout: scripts/native-quota/check_rocksdb_performance.sh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
       - name: Compare fixed-workload benchmark with release baseline
-        run: bash scripts/native-quota/check_rocksdb_performance.sh
+        run: bash .release-gate/scripts/native-quota/check_rocksdb_performance.sh
 
       - name: Upload benchmark evidence
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
