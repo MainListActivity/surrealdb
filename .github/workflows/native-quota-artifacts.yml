@@ -13,6 +13,10 @@ on:
         description: 'Exact commit or releases/sck-* ref to package'
         required: true
         default: 'releases/sck-4.0'
+      tikv_rehearsal:
+        description: 'Build and smoke-test TiKV on Linux without publishing a release'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -82,17 +86,32 @@ jobs:
         with:
           arch: ${{ matrix.arch }}
           platform: ${{ matrix.platform }}
-          name: native-quota
+          name: ${{ inputs.tikv_rehearsal && 'native-quota-tikv-rehearsal' || 'native-quota' }}
           version-override: ${{ needs.resolve.outputs.release }}
           build-metadata: sha.${{ needs.resolve.outputs.git_sha }}
           git-sha: ${{ needs.resolve.outputs.git_sha }}
-          extra-features: jwks,cjk,storage-rocksdb
-          upload: true
+          extra-features: ${{ inputs.tikv_rehearsal && 'jwks,cjk,storage-rocksdb,storage-tikv' || 'jwks,cjk,storage-rocksdb' }}
+          upload: ${{ !inputs.tikv_rehearsal }}
           release: true
           profile: release-thin
 
+      - name: Smoke-test TiKV on a disposable cluster
+        if: inputs.tikv_rehearsal
+        run: bash scripts/native-quota/tikv_binary_smoke.sh ./surreal
+
+      - name: Upload rehearsal-only archive
+        if: inputs.tikv_rehearsal
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: surreal-native-quota-tikv-rehearsal.linux-${{ matrix.platform }}
+          path: |
+            surreal-native-quota-tikv-rehearsal.linux-${{ matrix.platform }}.tgz
+            surreal-native-quota-tikv-rehearsal.linux-${{ matrix.platform }}.txt
+          if-no-files-found: error
+
   build-darwin:
     name: Build macOS CLI (arm64)
+    if: ${{ !inputs.tikv_rehearsal }}
     needs: resolve
     runs-on: macos-15
     permissions:
@@ -124,6 +143,7 @@ jobs:
 
   publish:
     name: Sign and publish artifacts
+    if: ${{ !inputs.tikv_rehearsal }}
     needs:
       - resolve
       - build-linux
