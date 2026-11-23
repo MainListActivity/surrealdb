@@ -97,6 +97,21 @@ class ReleaseManifestTests(unittest.TestCase):
             self.candidate, self.compatibility, self.sha, self.digest
         )
 
+    def test_tikv_candidate_requires_distinct_immutable_tags(self) -> None:
+        self.candidate["capability"]["storage_backend"] = "tikv"
+        with self.assertRaisesRegex(release_manifest.ManifestError, "immutable tags differ"):
+            release_manifest.verify_candidate(self.candidate, self.compatibility)
+        self.candidate["image"]["immutable_tags"] = [
+            self.compatibility["fork_release"] + "-tikv",
+            "sha-" + self.sha + "-tikv",
+        ]
+        release_manifest.verify_candidate(self.candidate, self.compatibility)
+
+    def test_uncertified_backend_is_rejected(self) -> None:
+        self.candidate["capability"]["storage_backend"] = "memory"
+        with self.assertRaisesRegex(release_manifest.ManifestError, "backend lacks production certification"):
+            release_manifest.verify_candidate(self.candidate, self.compatibility)
+
     def test_rejects_digest_drift(self) -> None:
         self.candidate["promotion"]["digest"] = "sha256:" + "c" * 64
         with self.assertRaisesRegex(release_manifest.ManifestError, "promotion digest"):
