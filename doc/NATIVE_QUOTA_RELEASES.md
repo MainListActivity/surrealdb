@@ -62,6 +62,12 @@ and are never overwritten. The GitHub pre-release is created last, so no
 candidate can exist when an earlier quota, backend, performance, capability,
 architecture, vulnerability, or signing gate fails.
 
+The candidate benchmark and manual CI preflight run on Linux ARM64. They
+measure the pinned, deployed RocksDB source and the candidate on the same
+runner with the same workload and thresholds, and retain both reports with
+their source identities. The gate script comes from the workflow revision, so
+the candidate checkout stays at the exact CI-certified source SHA.
+
 Automatic builds use RocksDB. To certify a TiKV variant, manually dispatch the
 candidate workflow from the protected release branch with `backend=tikv` and
 the exact release-line SHA. The TiKV build retains RocksDB support for migration
