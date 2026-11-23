@@ -52,7 +52,8 @@ same fact through the Actions API. It then runs:
 3. the fixed-workload RocksDB regression benchmark;
 4. one amd64 and one arm64 CLI build for the same release and Git SHA;
 5. one multi-architecture OCI build from those CLI artifacts;
-6. multi-architecture smoke tests and a RocksDB `/capabilities` identity check;
+6. multi-architecture smoke tests and a `/capabilities` check of the selected
+   storage backend (both architectures for TiKV);
 7. an SPDX SBOM, BuildKit SLSA provenance, HIGH/CRITICAL vulnerability gate,
    keyless image signature, CLI blob signatures, and signed candidate manifest.
 
@@ -60,6 +61,15 @@ The release and full-SHA OCI tags are checked for existence before publishing
 and are never overwritten. The GitHub pre-release is created last, so no
 candidate can exist when an earlier quota, backend, performance, capability,
 architecture, vulnerability, or signing gate fails.
+
+Automatic builds use RocksDB. To certify a TiKV variant, manually dispatch the
+candidate workflow from the protected release branch with `backend=tikv` and
+the exact release-line SHA. The TiKV build retains RocksDB support for migration
+tools. Its OCI release and SHA tags end in `-tikv`; its stable GitHub release
+also ends in `-tikv` and does not replace the default latest release. The
+signed manifest binds the selected backend. Runtime validation connects only to
+disposable loopback TiKV, and downstream TiKV acceptance requires keyless
+signature verification.
 
 The candidate manifest proves that CLI artifacts, image labels, the live
 capability document, compatibility manifest, fork release, and source all use
@@ -72,8 +82,8 @@ sidecars, compatibility/capability documents, supply-chain evidence and signed
 promotion receipts. Before publishing, the workflow re-downloads the draft assets
 by authenticated asset ID, verifies their bytes, signed-candidate hashes and CLI
 signatures, checks the ELF architecture and runs each CLI version (arm64 under
-QEMU) against the release and source SHA. It publishes the verified draft as the
-latest stable release, then downloads and verifies the published assets again.
+QEMU) against the release and source SHA. It publishes the verified draft, then
+downloads and verifies the published assets again.
 An interrupted draft or existing release with missing or changed assets fails
 closed; it is never silently repaired by overwriting an immutable artifact.
 
