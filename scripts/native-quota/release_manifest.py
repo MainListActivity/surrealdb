@@ -132,6 +132,12 @@ def platform_digests_from_index(index: dict[str, Any]) -> dict[str, str]:
     return platform_digests
 
 
+def immutable_tags(release: str, sha: str, backend: str) -> list[str]:
+    require(backend in {"rocksdb", "tikv"}, "unsupported release backend")
+    suffix = "-tikv" if backend == "tikv" else ""
+    return [f"{release}{suffix}", f"sha-{sha}{suffix}"]
+
+
 def render_candidate(args: argparse.Namespace) -> None:
     compatibility = load_json(args.compatibility)
     supply = compatibility_contract(compatibility)
@@ -154,6 +160,11 @@ def render_candidate(args: argparse.Namespace) -> None:
     require(
         capability.get("backend", {}).get("production") is True,
         "candidate capability must report a production-certified backend",
+    )
+    storage = capability.get("storage", {})
+    require(
+        storage.get("backend") == args.backend and storage.get("ready") is True,
+        "live storage backend differs from requested backend or is not ready",
     )
     labels = dict(compatibility.get("oci_labels", {}))
     labels.update(
@@ -182,7 +193,7 @@ def render_candidate(args: argparse.Namespace) -> None:
             "repository": repository,
             "digest": digest,
             "reference": f"{repository}@{digest}",
-            "immutable_tags": [release, f"sha-{sha}"],
+            "immutable_tags": immutable_tags(release, sha, args.backend),
             "platform_digests": platform_digests,
             "labels": labels,
         },
@@ -192,6 +203,7 @@ def render_candidate(args: argparse.Namespace) -> None:
             "artifacts": find_cli_artifacts(args.artifacts_dir),
         },
         "capability": {
+            "storage_backend": args.backend,
             "release": capability["fork"]["release"],
             "git_sha": capability["build"]["git_sha"],
             "manifest_revision": capability["manifest_revision"],
@@ -280,7 +292,18 @@ def verify_candidate(
     require(fork.get("manifest_revision") == revision, "manifest revision differs")
     require(image.get("repository") == supply["image_repository"], "image repository differs")
     require(image.get("reference") == f"{supply['image_repository']}@{digest}", "image reference is not digest-pinned")
-    require(image.get("immutable_tags") == [release, f"sha-{sha}"], "immutable tags differ")
+    backend = capability.get("storage_backend", "rocksdb")
+    require(
+        isinstance(backend, str) and any(
+            contract["name"] == backend
+            and contract.get("production") is True
+            and contract.get("hard_quota_certified") is True
+            and contract.get("persistent_restart_certified") is True
+            for contract in compatibility["backends"]
+        ),
+        "release backend lacks production certification",
+    )
+    require(image.get("immutable_tags") == immutable_tags(release, sha, backend), "immutable tags differ")
     platform_digests = image.get("platform_digests")
     require(
         isinstance(platform_digests, dict)
@@ -421,6 +444,7 @@ def parser() -> argparse.ArgumentParser:
     render = commands.add_parser("render")
     render.add_argument("--compatibility", type=Path, required=True)
     render.add_argument("--capability", type=Path, required=True)
+    render.add_argument("--backend", choices=["rocksdb", "tikv"], default="rocksdb")
     render.add_argument("--artifacts-dir", type=Path, required=True)
     render.add_argument("--sbom", type=Path, required=True)
     render.add_argument("--provenance", type=Path, required=True)

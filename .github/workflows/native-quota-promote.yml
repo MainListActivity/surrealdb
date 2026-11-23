@@ -51,6 +51,7 @@ jobs:
       target: ${{ steps.metadata.outputs.target }}
       candidate_tag: ${{ steps.metadata.outputs.candidate_tag }}
       release: ${{ steps.metadata.outputs.release }}
+      backend: ${{ steps.metadata.outputs.backend }}
       git_sha: ${{ steps.metadata.outputs.git_sha }}
       digest: ${{ steps.metadata.outputs.digest }}
       image_reference: ${{ steps.metadata.outputs.image_reference }}
@@ -160,6 +161,7 @@ jobs:
 
           sha="$(jq -er '.source.git_sha' native-quota-release-candidate.json)"
           release="$(jq -er '.fork.release' native-quota-release-candidate.json)"
+          backend="$(jq -er '.capability.storage_backend // "rocksdb"' native-quota-release-candidate.json)"
           image_reference="$(jq -er '.image.reference' native-quota-release-candidate.json)"
           digest="$(jq -er '.image.digest' native-quota-release-candidate.json)"
           test "$digest" = "$EXPECTED_DIGEST"
@@ -223,12 +225,16 @@ jobs:
               --arg release "$release" \
               --arg sha "$sha" \
               --arg digest "$digest" \
+              --arg backend "$backend" \
               '.format_version == 1
                and .decision == "accepted"
                and .repository == $repository
                and .candidate.release == $release
                and .candidate.git_sha == $sha
                and .candidate.digest == $digest
+               and (if $backend == "tikv" then
+                      .evidence.backend == $backend and .evidence.signature_policy == "verify_keyless"
+                    else true end)
                and .gates.contract == "passed"
                and .gates.e2e == "passed"
                and .gates.deployment == "passed"
@@ -240,6 +246,7 @@ jobs:
             echo "target=$TARGET"
             echo "candidate_tag=$CANDIDATE_TAG"
             echo "release=$release"
+            echo "backend=$backend"
             echo "git_sha=$sha"
             echo "digest=$digest"
             echo "image_reference=$image_reference"
@@ -406,12 +413,18 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE: ${{ needs.verify.outputs.release }}
+          BACKEND: ${{ needs.verify.outputs.backend }}
           SHA: ${{ needs.verify.outputs.git_sha }}
           IMAGE_REFERENCE: ${{ needs.verify.outputs.image_reference }}
           CANDIDATE_TAG: ${{ needs.verify.outputs.candidate_tag }}
         run: |
           set -euo pipefail
           stable_tag="sck-${RELEASE}"
+          make_latest=true
+          if [ "$BACKEND" = "tikv" ]; then
+            stable_tag+="-$BACKEND"
+            make_latest=false
+          fi
           source_dir="${PWD}/stable-candidate-assets"
           downloaded_dir="${PWD}/stable-downloaded-assets"
           mkdir -p "$source_dir" "$downloaded_dir"
@@ -512,12 +525,14 @@ jobs:
           verify_download "$downloaded_dir"
           if [ "$draft" = true ]; then
             gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/${release_id}" \
-              -F draft=false -f make_latest=true >/dev/null
+              -F draft=false -f "make_latest=$make_latest" >/dev/null
           fi
           gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}" \
             --jq '.draft == false' | grep -Fx true
-          gh api "repos/${GITHUB_REPOSITORY}/releases/latest" \
-            --jq '.id' | grep -Fx "$release_id"
+          if [ "$make_latest" = true ]; then
+            gh api "repos/${GITHUB_REPOSITORY}/releases/latest" \
+              --jq '.id' | grep -Fx "$release_id"
+          fi
 
           # Verify the published download path too, not just the draft assets.
           public_dir="${PWD}/stable-public-download"
