@@ -8,7 +8,7 @@ import hashlib
 import json
 import re
 import sys
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -377,6 +377,45 @@ def verify_candidate_command(args: argparse.Namespace) -> None:
     )
 
 
+def validate_approval(value: Any) -> dict[str, str]:
+    require(
+        isinstance(value, dict) and value.keys() == {"date", "quote"},
+        "approval must contain date and quote",
+    )
+    day, quote = value["date"], value["quote"]
+    require(
+        isinstance(day, str) and bool(re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", day)),
+        "approval date must be YYYY-MM-DD",
+    )
+    try:
+        date.fromisoformat(day)
+    except ValueError as error:
+        raise ManifestError("approval date must be valid") from error
+    require(
+        isinstance(quote, str) and bool(quote.strip()) and len(quote) <= 4096,
+        "approval quote must contain 1-4096 characters",
+    )
+    return value
+
+
+def expected_approval(args: argparse.Namespace) -> dict[str, str] | None:
+    if args.approval:
+        require(args.stage == "canary" and not args.canary_receipt, "only canary accepts a new approval")
+        try:
+            return validate_approval(json.loads(args.approval))
+        except json.JSONDecodeError as error:
+            raise ManifestError("approval must be valid JSON") from error
+    if args.canary_receipt:
+        require(args.stage != "canary", "canary cannot inherit approval")
+        canary = verify_receipt(
+            argparse.Namespace(
+                **(vars(args) | {"stage": "canary", "receipt": args.canary_receipt, "canary_receipt": None})
+            )
+        )
+        return canary.get("approval")
+    return None
+
+
 def render_receipt(args: argparse.Namespace) -> None:
     candidate = load_json(args.candidate)
     compatibility = load_json(args.compatibility)
@@ -403,10 +442,13 @@ def render_receipt(args: argparse.Namespace) -> None:
             "downstream_acceptance_run_url": args.downstream_acceptance_run_url,
         },
     }
+    approval = expected_approval(args)
+    if approval is not None:
+        receipt["approval"] = approval
     write_json(args.output, receipt)
 
 
-def verify_receipt(args: argparse.Namespace) -> None:
+def verify_receipt(args: argparse.Namespace) -> dict[str, Any]:
     candidate = load_json(args.candidate)
     compatibility = load_json(args.compatibility)
     verify_candidate(candidate, compatibility, args.expected_sha, args.expected_digest)
@@ -435,6 +477,11 @@ def verify_receipt(args: argparse.Namespace) -> None:
             bool(receipt.get("promotion", {}).get("downstream_acceptance_run_url")),
             "production receipt lacks downstream acceptance",
         )
+    if "approval" in receipt:
+        validate_approval(receipt["approval"])
+    if args.approval or args.canary_receipt:
+        require(receipt.get("approval") == expected_approval(args), "receipt approval differs")
+    return receipt
 
 
 def parser() -> argparse.ArgumentParser:
@@ -475,6 +522,8 @@ def parser() -> argparse.ArgumentParser:
     receipt.add_argument("--actor", required=True)
     receipt.add_argument("--run-url", required=True)
     receipt.add_argument("--downstream-acceptance-run-url", default="")
+    receipt.add_argument("--approval", default="")
+    receipt.add_argument("--canary-receipt", type=Path)
     receipt.add_argument("--output", type=Path, required=True)
     receipt.set_defaults(function=render_receipt)
 
@@ -485,6 +534,8 @@ def parser() -> argparse.ArgumentParser:
     verify_promotion.add_argument("--stage", choices=STAGES, required=True)
     verify_promotion.add_argument("--expected-sha")
     verify_promotion.add_argument("--expected-digest")
+    verify_promotion.add_argument("--approval", default="")
+    verify_promotion.add_argument("--canary-receipt", type=Path)
     verify_promotion.set_defaults(function=verify_receipt)
     return root
 

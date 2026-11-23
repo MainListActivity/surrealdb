@@ -157,6 +157,8 @@ class ReleaseManifestTests(unittest.TestCase):
                     "stage": "production",
                     "expected_sha": self.sha,
                     "expected_digest": self.digest,
+                    "approval": "",
+                    "canary_receipt": None,
                 },
             )()
             with self.assertRaisesRegex(
@@ -196,9 +198,63 @@ class ReleaseManifestTests(unittest.TestCase):
                     "stage": "canary",
                     "expected_sha": self.sha,
                     "expected_digest": self.digest,
+                    "approval": "",
+                    "canary_receipt": None,
                 },
             )()
             release_manifest.verify_receipt(args)
+
+    def test_approval_propagates_from_canary_and_must_not_drift(self) -> None:
+        approval = {"date": "2026-11-19", "quote": "批准此候选。\n保留全部门槛。"}
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            candidate = directory / "candidate.json"
+            candidate.write_text(json.dumps(self.candidate))
+            common = [
+                "--candidate", str(candidate),
+                "--compatibility", str(self.compatibility_path),
+                "--expected-sha", self.sha,
+                "--expected-digest", self.digest,
+            ]
+            parser = release_manifest.parser()
+            canary = directory / "canary.json"
+            for stage in release_manifest.STAGES:
+                path = directory / f"{stage}.json"
+                approval_args = (
+                    ["--approval", json.dumps(approval)]
+                    if stage == "canary"
+                    else ["--canary-receipt", str(canary)]
+                )
+                render = parser.parse_args([
+                    "receipt", *common, "--stage", stage, "--actor", "release-operator",
+                    "--run-url", "https://example.com/promotion",
+                    "--downstream-acceptance-run-url", "https://example.com/acceptance",
+                    "--output", str(path), *approval_args,
+                ])
+                release_manifest.render_receipt(render)
+                verify = parser.parse_args([
+                    "verify-receipt", *common, "--stage", stage, "--receipt", str(path),
+                    *approval_args,
+                ])
+                signed_content = release_manifest.verify_receipt(verify)
+                self.assertEqual(signed_content["approval"], approval)
+                if stage != "canary":
+                    signed_content.pop("approval")
+                    path.write_text(json.dumps(signed_content))
+                    with self.assertRaisesRegex(release_manifest.ManifestError, "approval differs"):
+                        release_manifest.verify_receipt(verify)
+                    render.approval = json.dumps(approval)
+                    with self.assertRaisesRegex(release_manifest.ManifestError, "only canary"):
+                        release_manifest.render_receipt(render)
+
+    def test_approval_requires_a_valid_date_and_verbatim_text(self) -> None:
+        for value in (
+            {"date": "2026-02-29", "quote": "Approved."},
+            {"date": "2026-11-19", "quote": " "},
+            {"date": "2026-11-19"},
+        ):
+            with self.subTest(value=value), self.assertRaises(release_manifest.ManifestError):
+                release_manifest.validate_approval(value)
 
 
 if __name__ == "__main__":

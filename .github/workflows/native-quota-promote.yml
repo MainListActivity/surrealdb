@@ -23,6 +23,9 @@ on:
         options:
           - canary
           - staging
+      approval:
+        description: 'Optional canary-only approval JSON: {"date":"YYYY-MM-DD","quote":"..."}'
+        type: string
   repository_dispatch:
     types:
       - native-quota-stable-accepted
@@ -201,6 +204,7 @@ jobs:
               --compatibility native-quota-v1.json \
               --receipt promotion-staging.json \
               --stage staging \
+              --canary-receipt promotion-canary.json \
               --expected-sha "$sha" \
               --expected-digest "$digest"
             test "$EVENT_NAME" = "repository_dispatch"
@@ -341,8 +345,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.verify.outputs.candidate_tag }}
           TARGET: ${{ needs.verify.outputs.target }}
+          APPROVAL: ${{ inputs.approval }}
         run: |
           set -euo pipefail
+          approval_args=(--approval="$APPROVAL")
+          if [ "$TARGET" != canary ]; then
+            approval_args+=(--canary-receipt promotion-canary.json)
+          fi
           temporary="$(mktemp -d)"
           if gh release download "$TAG" --dir "$temporary" \
             --pattern "promotion-${TARGET}.json" \
@@ -360,6 +369,7 @@ jobs:
               --compatibility native-quota-v1.json \
               --receipt "promotion-${TARGET}.json" \
               --stage "$TARGET" \
+              "${approval_args[@]}" \
               --expected-sha "${{ needs.verify.outputs.git_sha }}" \
               --expected-digest "${{ needs.verify.outputs.digest }}"
             echo "existing=true" >> "$GITHUB_OUTPUT"
@@ -375,8 +385,13 @@ jobs:
           SHA: ${{ needs.verify.outputs.git_sha }}
           DIGEST: ${{ needs.verify.outputs.digest }}
           ACCEPTANCE_RUN_URL: ${{ needs.verify.outputs.acceptance_run_url }}
+          APPROVAL: ${{ inputs.approval }}
         run: |
           set -euo pipefail
+          approval_args=(--approval="$APPROVAL")
+          if [ "$TARGET" != canary ]; then
+            approval_args+=(--canary-receipt promotion-canary.json)
+          fi
           receipt="promotion-${TARGET}.json"
           python3 scripts/native-quota/release_manifest.py receipt \
             --candidate native-quota-release-candidate.json \
@@ -387,6 +402,7 @@ jobs:
             --actor "$GITHUB_ACTOR" \
             --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
             --downstream-acceptance-run-url "$ACCEPTANCE_RUN_URL" \
+            "${approval_args[@]}" \
             --output "$receipt"
           cosign sign-blob --yes --bundle "${receipt%.json}.sigstore.json" "$receipt"
           python3 scripts/native-quota/release_manifest.py verify-receipt \
@@ -394,6 +410,7 @@ jobs:
             --compatibility native-quota-v1.json \
             --receipt "$receipt" \
             --stage "$TARGET" \
+            "${approval_args[@]}" \
             --expected-sha "$SHA" \
             --expected-digest "$DIGEST"
 

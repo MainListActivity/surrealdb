@@ -110,7 +110,11 @@ Promotion is strictly `canary -> staging -> production`. Each stage:
   digest.
 
 Canary and staging are manual. Production is intentionally absent from the
-manual choice list. It is triggered only by a
+manual choice list. Canary accepts optional dated approval evidence as
+`{"date":"YYYY-MM-DD","quote":"..."}`. The signed canary receipt binds it to
+the exact candidate; staging and production copy it from the verified
+receipt. This records approval without replacing environment protection or
+any signature, digest, or acceptance check. Production is triggered only by a
 `native-quota-stable-accepted` repository dispatch from the downstream
 `MainListActivity/surreal_ck` acceptance workflow. The dispatch contains:
 
