@@ -548,6 +548,25 @@ impl Datastore {
 			(None, Some(_)) => return Ok(false),
 			(asked, _) => asked.unwrap_or(0),
 		};
+		// No barrier has been raised, so this answer covers none and no build waits on it: it
+		// records that this node answers barriers without waiting for, or passing, any of the
+		// transactions it holds open. Every barrier raised from now on is numbered after it.
+		if asked == 0 {
+			drop(raises);
+			let tx = self.transaction(TransactionType::Write).await?;
+			catch!(
+				tx,
+				tx.set_key(
+					&WriteBarrierAckKey {
+						nd: self.id(),
+					},
+					&asked
+				)
+				.await
+			);
+			tx.commit().await?;
+			return Ok(true);
+		}
 		// An answer to barriers only this node's builds raised passes no transaction a build
 		// elsewhere waits for: each of those builds waits for this node's transactions directly.
 		// Any other answer is a wait that may pass a transaction set aside for its own build, and
