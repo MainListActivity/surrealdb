@@ -555,6 +555,10 @@ impl Transactable for LatencyTx {
 		self.inner.sole_writer()
 	}
 
+	fn sole_catalog_writer(&self) -> bool {
+		self.inner.sole_catalog_writer()
+	}
+
 	fn validates_reads(&self) -> bool {
 		self.inner.validates_reads()
 	}

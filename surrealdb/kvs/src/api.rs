@@ -505,6 +505,17 @@ pub trait Transactable: Send + Sync {
 		false
 	}
 
+	/// Whether every commit that changes the catalog or durable index build state is committed
+	/// through the datastore this transaction belongs to, and this transaction reads a snapshot
+	/// taken after every commit that returned before it opened. The datastore then names the
+	/// catalog and build state a transaction sees by counting its own commits of them, and shares
+	/// the definitions read under one count between transactions. Answered by
+	/// [`Self::sole_writer`] unless the backend is told so by its operator: it cannot know that
+	/// no other process writes the catalog of a store it shares.
+	fn sole_catalog_writer(&self) -> bool {
+		self.sole_writer()
+	}
+
 	/// The longest a write commit to a store other datastores write may run before the
 	/// datastore reports its outcome unknown and abandons it.
 	///
