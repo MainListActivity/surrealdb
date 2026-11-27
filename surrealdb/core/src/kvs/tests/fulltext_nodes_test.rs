@@ -46,15 +46,16 @@ use crate::kvs::ds::{TransactionBuilderFactory, TransactionBuilderParts};
 /// Shutting a datastore down leaves the backend open: it is shared, so the
 /// first datastore to drop would otherwise close it under the others. Its
 /// transactions are [`SharedTx`]s.
-struct SharedBuilder(Arc<dyn TransactionBuilder>);
+struct SharedBuilder(Arc<dyn TransactionBuilder>, bool);
 
 /// A transaction of a store several datastores write, as TiKV's are: it
 /// answers every read and write as the store's own transaction does, but never
 /// claims its datastore is the store's sole writer
 /// ([`Transactable::sole_writer`]). A datastore that did would serve the
 /// catalog from what its own commits told it, and never see another node's
-/// definitions.
-struct SharedTx(Box<dyn Transactable>);
+/// definitions. Its second field is what it answers for
+/// [`Transactable::sole_catalog_writer`], as an operator declares it.
+struct SharedTx(Box<dyn Transactable>, bool);
 
 impl Transactable for SharedTx {
 	fn kind(&self) -> &'static str {
@@ -62,6 +63,9 @@ impl Transactable for SharedTx {
 	}
 	fn sole_writer(&self) -> bool {
 		false
+	}
+	fn sole_catalog_writer(&self) -> bool {
+		self.1
 	}
 	fn validates_reads(&self) -> bool {
 		self.0.validates_reads()
@@ -307,7 +311,7 @@ impl TransactionBuilder for SharedBuilder {
 	) -> BoxFut<'_, surrealdb_kvs::Result<(Box<dyn Transactable>, bool)>> {
 		Box::pin(async move {
 			let (tx, flag) = self.0.new_transaction(write).await?;
-			Ok((Box::new(SharedTx(tx)) as Box<dyn Transactable>, flag))
+			Ok((Box::new(SharedTx(tx, self.1)) as Box<dyn Transactable>, flag))
 		})
 	}
 
@@ -333,7 +337,7 @@ impl TransactionBuilder for SharedBuilder {
 }
 
 /// A composer handing every datastore it builds the same backend.
-pub(super) struct SharedBackend(Arc<dyn TransactionBuilder>);
+pub(super) struct SharedBackend(Arc<dyn TransactionBuilder>, bool);
 
 impl SharedBackend {
 	#[cfg(feature = "kv-mem")]
@@ -342,7 +346,13 @@ impl SharedBackend {
 			.new_transaction_builder("memory", CancellationToken::new(), ConfigMap::empty())
 			.await
 			.expect("an in-memory backend");
-		Self(Arc::from(builder))
+		Self(Arc::from(builder), false)
+	}
+
+	/// This backend, with its transactions declaring their datastore the only
+	/// writer of the catalog ([`Transactable::sole_catalog_writer`]).
+	pub(super) fn declaring_sole_catalog_writer(self) -> Self {
+		Self(self.0, true)
 	}
 }
 
@@ -355,9 +365,10 @@ impl TransactionBuilderFactory for SharedBackend {
 		_canceller: CancellationToken,
 		_config: ConfigMap,
 	) -> anyhow::Result<TransactionBuilderParts<()>> {
-		Ok(TransactionBuilderParts::without_router_state(Box::new(SharedBuilder(Arc::clone(
-			&self.0,
-		)))))
+		Ok(TransactionBuilderParts::without_router_state(Box::new(SharedBuilder(
+			Arc::clone(&self.0),
+			self.1,
+		))))
 	}
 
 	fn path_valid(&self, v: &str) -> anyhow::Result<String> {
@@ -381,7 +392,7 @@ pub(super) async fn node(backend: &SharedBackend, legacy: bool) -> Arc<Datastore
 		builder
 	};
 	builder
-		.build_with_factory_path("memory", SharedBackend(Arc::clone(&backend.0)))
+		.build_with_factory_path("memory", SharedBackend(Arc::clone(&backend.0), backend.1))
 		.await
 		.expect("a node over the shared backend")
 }
@@ -634,4 +645,55 @@ async fn two_nodes_over_one_memory_store_score_as_it_holds() {
 		nodes_score_as_the_store_holds_it(a, b, || node(&backend, false), format).await
 	};
 	assert_eq!(blocks, bitmaps, "the block indexes answered as the bitmap indexes");
+}
+
+/// A datastore over a store it shares names no catalog epoch, unless its
+/// transactions declare it the only writer of the catalog: then it names one,
+/// a definition it commits moves it, and every read of the new epoch sees the
+/// definition.
+#[cfg(feature = "kv-mem")]
+#[tokio::test]
+async fn a_declared_sole_catalog_writer_names_the_catalog_epoch() {
+	use crate::catalog::providers::TableProvider;
+
+	async fn epoch(ds: &Datastore) -> Option<u64> {
+		let txn = ds.transaction(TransactionType::Read).await.expect("a transaction");
+		let epoch = txn.catalog_epoch();
+		txn.cancel().await.expect("cancelled");
+		epoch
+	}
+	let shared = node(&SharedBackend::memory().await, false).await;
+	assert_eq!(epoch(&shared).await, None, "a shared store's reads name no epoch");
+
+	let ds = node(&SharedBackend::memory().await.declaring_sole_catalog_writer(), false).await;
+	let owner = Session::owner().with_ns("test").with_db("test");
+	let define = |comment: &'static str| {
+		let ds = Arc::clone(&ds);
+		let owner = owner.clone();
+		async move {
+			let sql = format!(
+				"DEFINE NAMESPACE IF NOT EXISTS test; DEFINE DATABASE IF NOT EXISTS test; \
+				 DEFINE TABLE OVERWRITE person COMMENT '{comment}'"
+			);
+			for response in ds.execute(&sql, &owner, None).await.expect("the request runs") {
+				response.result.expect("the table is defined");
+			}
+		}
+	};
+	define("one").await;
+	let before = epoch(&ds).await.expect("a declared sole catalog writer names an epoch");
+	define("two").await;
+	let after = epoch(&ds).await.expect("a declared sole catalog writer names an epoch");
+	assert!(after > before, "a definition it commits moves the epoch");
+	let person = crate::val::TableName::from("person");
+	for _ in 0..2 {
+		let txn = ds.transaction(TransactionType::Read).await.expect("a transaction");
+		let tb = txn.get_tb_by_name("test", "test", &person, None).await.expect("read");
+		txn.cancel().await.expect("cancelled");
+		assert_eq!(
+			tb.and_then(|tb| tb.comment.clone()).as_deref(),
+			Some("two"),
+			"every read of the new epoch sees the definition"
+		);
+	}
 }

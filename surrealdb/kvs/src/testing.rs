@@ -36,6 +36,10 @@ impl Transactable for ViewlessTransaction {
 	fn sole_writer(&self) -> bool {
 		self.0.sole_writer()
 	}
+
+	fn sole_catalog_writer(&self) -> bool {
+		self.0.sole_catalog_writer()
+	}
 	fn validates_reads(&self) -> bool {
 		self.0.validates_reads()
 	}

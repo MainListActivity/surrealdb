@@ -64,6 +64,17 @@ impl CatalogEpoch {
 		self.started.fetch_add(1, Ordering::SeqCst);
 		CatalogCommit(self)
 	}
+
+	/// Count a catalog commit as under way until [`Self::release`]: one whose
+	/// outcome is unknown, which the store may still land after it returned.
+	pub(crate) fn hold(&self) {
+		self.started.fetch_add(1, Ordering::SeqCst);
+	}
+
+	/// End a hold taken by [`Self::hold`].
+	pub(crate) fn release(&self) {
+		self.finished.fetch_add(1, Ordering::SeqCst);
+	}
 }
 
 /// How many commits of transactions that wrote durable index build state
@@ -92,6 +103,16 @@ impl BuildEpoch {
 	/// took.
 	pub(crate) fn committing(&self) -> CatalogCommit<'_> {
 		self.0.committing()
+	}
+
+	/// See [`CatalogEpoch::hold`].
+	pub(crate) fn hold(&self) {
+		self.0.hold()
+	}
+
+	/// See [`CatalogEpoch::release`].
+	pub(crate) fn release(&self) {
+		self.0.release()
 	}
 }
 
