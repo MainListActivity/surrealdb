@@ -411,6 +411,14 @@ impl Transactor {
 		self.inner.sole_writer()
 	}
 
+	/// Whether every catalog and index build state change to the store is committed through the
+	/// datastore this transaction belongs to.
+	///
+	/// See [`surrealdb_kvs::api::Transactable::sole_catalog_writer`].
+	pub fn sole_catalog_writer(&self) -> bool {
+		self.inner.sole_catalog_writer()
+	}
+
 	/// The longest a write commit may run before its outcome is reported unknown.
 	///
 	/// See [`surrealdb_kvs::api::Transactable::write_commit_bound`].

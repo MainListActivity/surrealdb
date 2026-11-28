@@ -114,6 +114,17 @@ pub struct TikvConfig {
 	/// Bounded budget for the final advisory GC pass at shutdown, in
 	/// seconds. A slow GC should not stall process exit.
 	pub shutdown_gc_timeout_secs: u64,
+
+	/// Whether this datastore is the only process that writes the catalog
+	/// and index build state of the cluster
+	/// ([`surrealdb_kvs::Transactable::sole_catalog_writer`]).
+	///
+	/// When set, definitions read under one catalog epoch are shared between
+	/// transactions instead of being read from TiKV by each. Defaults to
+	/// `false`. Only set it where exactly one SurrealDB node runs against the
+	/// cluster: definitions another node commits are not seen until this
+	/// node commits a definition of its own or restarts.
+	pub sole_catalog_writer: bool,
 }
 
 /// Batch size used by the TiKV `delr` scan loop. Each pass fetches up to
@@ -141,6 +152,7 @@ impl Default for TikvConfig {
 			health_probe: true,
 			shutdown_grace_secs: 30,
 			shutdown_gc_timeout_secs: 10,
+			sole_catalog_writer: false,
 		}
 	}
 }
@@ -168,7 +180,8 @@ impl Config for TikvConfig {
 			.parse_key("tikv_gc_lifetime", &mut self.gc_lifetime_secs)
 			.parse_key_bool("tikv_health_probe", &mut self.health_probe)
 			.parse_key("tikv_shutdown_grace", &mut self.shutdown_grace_secs)
-			.parse_key("tikv_shutdown_gc_timeout", &mut self.shutdown_gc_timeout_secs);
+			.parse_key("tikv_shutdown_gc_timeout", &mut self.shutdown_gc_timeout_secs)
+			.parse_key_bool("tikv_sole_catalog_writer", &mut self.sole_catalog_writer);
 	}
 }
 
@@ -195,6 +208,7 @@ mod test {
 		assert!(config.health_probe);
 		assert_eq!(config.shutdown_grace_secs, 30);
 		assert_eq!(config.shutdown_gc_timeout_secs, 10);
+		assert!(!config.sole_catalog_writer);
 	}
 
 	#[test]
@@ -215,7 +229,8 @@ mod test {
 			.with_key_value("tikv_gc_lifetime", "1200")
 			.with_key_value("tikv_health_probe", "false")
 			.with_key_value("tikv_shutdown_grace", "60")
-			.with_key_value("tikv_shutdown_gc_timeout", "5");
+			.with_key_value("tikv_shutdown_gc_timeout", "5")
+			.with_key_value("tikv_sole_catalog_writer", "true");
 		let config = map.load::<TikvConfig>();
 		assert_eq!(config.api_version, 2);
 		assert_eq!(config.keyspace.as_deref(), Some("my-keyspace"));
@@ -233,5 +248,6 @@ mod test {
 		assert!(!config.health_probe);
 		assert_eq!(config.shutdown_grace_secs, 60);
 		assert_eq!(config.shutdown_gc_timeout_secs, 5);
+		assert!(config.sole_catalog_writer);
 	}
 }
