@@ -9787,6 +9787,28 @@ async fn a_transaction_is_not_refused_for_its_own_nodes_answer_to_its_build() ->
 	Ok(())
 }
 
+/// A node's first answer, made before any write barrier has been raised, covers no build's wait:
+/// a write transaction set aside meanwhile, as one awaiting its own build is, still commits.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_first_answer_before_any_barrier_refuses_no_transaction() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	let txn = Arc::new(ds.transaction(TransactionType::Write).await?);
+	let request =
+		QueryRequest::new("CREATE t:1 SET n = 1", &session).with_transaction(Arc::clone(&txn));
+	for result in ds.run(request).await? {
+		result.result?;
+	}
+	let parked = txn.park_live_write().expect("a write transaction is counted");
+	assert!(
+		ds.answer_write_barrier(&CancellationToken::new()).await?,
+		"a node with no answer recorded records one"
+	);
+	drop(parked);
+	txn.commit().await?;
+	Ok(())
+}
+
 /// Commit a client-owned transaction on node A of two that runs `writes` and then
 /// `DEFINE INDEX ia ON a`, whose build is held while node B rebuilds `ix ON t`, which reads only
 /// once node A has answered its write barrier. Answers the commit's outcome. The `writes` write no

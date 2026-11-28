@@ -765,3 +765,40 @@ async fn a_writer_that_changed_a_field_reads_its_own_catalog_for_its_gate_and_pu
 	assert!(!purge_gate(&reader).await, "nothing the writer wrote is served");
 	reader.cancel().await.expect("cancelled");
 }
+
+/// A definition whose commit reports its outcome unknown leaves the catalog
+/// epoch unsettled while the store may still land it, and the epoch that
+/// follows is read from the store as the commit left it.
+#[tokio::test(start_paused = true)]
+async fn a_definition_of_unknown_commit_outcome_holds_the_epoch_unsettled() {
+	use crate::kvs::testing::{QuotaFaultSite, inject_quota_fault};
+
+	let db = TestDb::new(SETUP).await;
+	let (ds, owner) = (db.datastore(), TestDb::owner());
+	let before = epoch(ds).await;
+	let person = TableName::from("person");
+	let comment = || async {
+		let txn = ds.transaction(TransactionType::Read).await.expect("a transaction");
+		let named = txn.catalog_epoch();
+		let tb = txn.get_tb_by_name("test", "test", &person, None).await.expect("read");
+		txn.cancel().await.expect("cancelled");
+		(named, tb.and_then(|tb| tb.comment.clone()))
+	};
+	let _fault = inject_quota_fault(QuotaFaultSite::CommitOutcomeUnknown, ds.id());
+	let failed = ds
+		.execute("DEFINE TABLE OVERWRITE person COMMENT 'landed'", &owner, None)
+		.await
+		.map(|mut responses| responses.remove(0).result);
+	assert!(
+		matches!(failed, Err(_) | Ok(Err(_))),
+		"the definition reports its commit outcome unknown: {failed:?}"
+	);
+	let (named, _) = comment().await;
+	assert_eq!(named, None, "no read names an epoch while the commit may still land");
+
+	tokio::time::sleep(surrealdb_datastore::triggers::ABANDONED_COMMIT_SETTLE).await;
+	tokio::task::yield_now().await;
+	let (named, seen) = comment().await;
+	assert!(named.is_some_and(|after| after > before), "the epoch settles past the commit");
+	assert_eq!(seen.as_deref(), Some("landed"), "the epoch's reads see what the commit applied");
+}

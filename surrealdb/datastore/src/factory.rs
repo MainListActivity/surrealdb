@@ -216,9 +216,11 @@ impl TransactionFactory {
 			}
 		};
 		let sole_writer = self.engine_is_sole_writer(inner.sole_writer());
-		let catalog_epoch = settled.filter(|_| sole_writer).unwrap_or(crate::tx::NO_CATALOG_EPOCH);
+		let counts_catalog = self.engine_is_sole_writer(inner.sole_catalog_writer());
+		let catalog_epoch =
+			settled.filter(|_| counts_catalog).unwrap_or(crate::tx::NO_CATALOG_EPOCH);
 		let build_epoch =
-			build_settled.filter(|_| sole_writer).unwrap_or(crate::tx::NO_BUILD_EPOCH);
+			build_settled.filter(|_| counts_catalog).unwrap_or(crate::tx::NO_BUILD_EPOCH);
 		Ok(Transaction::new(
 			local,
 			sequences,
@@ -352,10 +354,12 @@ impl TransactionFactory {
 				// and never trusted as the sole writer's view.
 				let sole_writer =
 					self.engine_is_sole_writer(transaction.sole_writer()) && !info.stale;
+				let counts_catalog =
+					self.engine_is_sole_writer(transaction.sole_catalog_writer()) && !info.stale;
 				let catalog_epoch =
-					settled.filter(|_| sole_writer).unwrap_or(crate::tx::NO_CATALOG_EPOCH);
+					settled.filter(|_| counts_catalog).unwrap_or(crate::tx::NO_CATALOG_EPOCH);
 				let build_epoch =
-					build_settled.filter(|_| sole_writer).unwrap_or(crate::tx::NO_BUILD_EPOCH);
+					build_settled.filter(|_| counts_catalog).unwrap_or(crate::tx::NO_BUILD_EPOCH);
 				let tx = Transaction::new(
 					local,
 					sequences,
@@ -427,9 +431,11 @@ impl TransactionFactory {
 			}
 		};
 		let sole_writer = self.engine_is_sole_writer(inner.sole_writer());
-		let catalog_epoch = settled.filter(|_| sole_writer).unwrap_or(crate::tx::NO_CATALOG_EPOCH);
+		let counts_catalog = self.engine_is_sole_writer(inner.sole_catalog_writer());
+		let catalog_epoch =
+			settled.filter(|_| counts_catalog).unwrap_or(crate::tx::NO_CATALOG_EPOCH);
 		let build_epoch =
-			build_settled.filter(|_| sole_writer).unwrap_or(crate::tx::NO_BUILD_EPOCH);
+			build_settled.filter(|_| counts_catalog).unwrap_or(crate::tx::NO_BUILD_EPOCH);
 		Ok(Transaction::new(
 			local,
 			sequences,

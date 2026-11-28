@@ -941,6 +941,12 @@ impl Transactable for Transaction {
 		false
 	}
 
+	/// As the operator declared it ([`TikvConfig::sole_catalog_writer`]). Every transaction takes
+	/// its start timestamp from PD after it opens, so it reads every commit that returned before.
+	fn sole_catalog_writer(&self) -> bool {
+		self.handle.config.sole_catalog_writer
+	}
+
 	/// Cancel a transaction
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))]
 	fn cancel(&self) -> BoxFut<'_, Result<()>> {

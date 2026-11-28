@@ -2124,6 +2124,25 @@ fn shaped_indexes(indexes: &[catalog::IndexDefinition]) -> Vec<IndexId> {
 		.collect()
 }
 
+/// A commit counted as under way among a datastore's catalog and build-state commits
+/// ([`crate::triggers::CatalogEpoch`]), from [`Transaction::hold_epochs`] until it is dropped.
+struct EpochHold {
+	triggers: Arc<CommitTriggers>,
+	catalog: bool,
+	build: bool,
+}
+
+impl Drop for EpochHold {
+	fn drop(&mut self) {
+		if self.catalog {
+			self.triggers.catalog_epoch.release();
+		}
+		if self.build {
+			self.triggers.build_epoch.release();
+		}
+	}
+}
+
 impl Transaction {
 	/// Route a request path to the one `DEFINE API` that handles it, compiling
 	/// only that definition.
@@ -2151,6 +2170,7 @@ impl Transaction {
 		}
 		.range()?;
 		let val = self.tr.getr(range.into_key_range(), None).await?;
+		self.metrics.record_scan(val.values.len() as u64, val.key_bytes, val.value_bytes);
 		let stored: Arc<[catalog::StoredApiDefinition]> =
 			util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 
@@ -2244,6 +2264,11 @@ impl Transaction {
 		}
 		.range()?;
 		let table_rows = self.tr.getr(table_range.into_key_range(), None).await?;
+		self.metrics.record_scan(
+			table_rows.values.len() as u64,
+			table_rows.key_bytes,
+			table_rows.value_bytes,
+		);
 		'walk: for (_, raw_table) in table_rows.values.iter() {
 			let Some(tb) = Self::decode_or_refused::<StoredTableDefinition>(raw_table)? else {
 				refused = true;
@@ -2257,6 +2282,11 @@ impl Transaction {
 			}
 			.range()?;
 			let field_rows = self.tr.getr(field_range.into_key_range(), None).await?;
+			self.metrics.record_scan(
+				field_rows.values.len() as u64,
+				field_rows.key_bytes,
+				field_rows.value_bytes,
+			);
 			for (_, raw_field) in field_rows.values.iter() {
 				let Some(fd) =
 					Self::decode_or_refused::<catalog::StoredFieldDefinition>(raw_field)?
@@ -3482,7 +3512,10 @@ impl Transaction {
 				QuotaFaultSite::CommitOutcomeUnknown,
 				self.sequences.node_id(),
 			)
-			.map_err(|error| KvsError::CommitOutcomeUnknown(error.to_string())),
+			.map_err(|error| {
+				self.hold_epochs_unsettled(self.hold_epochs());
+				KvsError::CommitOutcomeUnknown(error.to_string())
+			}),
 			other => other,
 		};
 
@@ -3495,6 +3528,7 @@ impl Transaction {
 						if let Some(hook) = hook {
 							hook().await;
 						}
+						self.hold_epochs_unsettled(self.hold_epochs());
 						Err(KvsError::CommitOutcomeUnknown(
 							"injected once the commit applied".to_string(),
 						))
@@ -7660,6 +7694,7 @@ impl Transaction {
 		}
 		.range()?;
 		let val = self.tr.getr(range.into_key_range(), None).await?;
+		self.metrics.record_scan(val.values.len() as u64, val.key_bytes, val.value_bytes);
 		let stored: Arc<[catalog::StoredFieldDefinition]> =
 			util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 		let val = catalog::fields_from_stored(&stored)?;
@@ -7746,6 +7781,7 @@ impl Transaction {
 			}
 			.range()?;
 			let val = self.tr.getr(range.into_key_range(), version).await?;
+			self.metrics.record_scan(val.values.len() as u64, val.key_bytes, val.value_bytes);
 			let stored: Arc<[StoredTableDefinition]> =
 				util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 			return catalog::from_stored_all(&stored);
@@ -7768,6 +7804,7 @@ impl Transaction {
 		}
 		.range()?;
 		let val = self.tr.getr(range.into_key_range(), None).await?;
+		self.metrics.record_scan(val.values.len() as u64, val.key_bytes, val.value_bytes);
 		let stored: Arc<[StoredTableDefinition]> =
 			util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 		let val = catalog::from_stored_all(&stored)?;
@@ -7851,7 +7888,7 @@ impl Transaction {
 	///
 	/// A transaction names an epoch only where its engine is the store's sole
 	/// writer: the datastore opens it with [`NO_CATALOG_EPOCH`] unless
-	/// `inner.sole_writer()` holds (`factory.rs`, where each transaction is
+	/// `inner.sole_catalog_writer()` holds (`factory.rs`, where each transaction is
 	/// opened), and [`Self::catalog_epoch`] answers `None` for that value
 	/// whatever the settled count is.
 	fn epoch_catalog(&self) -> Option<(u64, &crate::cache::epoch::EpochCatalog)> {
@@ -8011,8 +8048,48 @@ impl Transaction {
 		} else {
 			self.tr.commit().await
 		};
+		if matches!(committed, Err(KvsError::CommitOutcomeUnknown(_))) {
+			self.hold_epochs_unsettled(self.hold_epochs());
+		}
 		self.end_live_write();
 		committed
+	}
+
+	/// Count this transaction's commit as under way among the datastore's catalog and build-state
+	/// commits ([`crate::triggers::CatalogEpoch`], [`crate::triggers::BuildEpoch`]) it moves, until
+	/// the returned hold is dropped; `None` where it moves neither.
+	fn hold_epochs(&self) -> Option<EpochHold> {
+		let catalog = self.changed_catalog();
+		let build = self.tr.wrote_build_state();
+		if !catalog && !build {
+			return None;
+		}
+		if catalog {
+			self.triggers.catalog_epoch.hold();
+		}
+		if build {
+			self.triggers.build_epoch.hold();
+		}
+		Some(EpochHold {
+			triggers: Arc::clone(&self.triggers),
+			catalog,
+			build,
+		})
+	}
+
+	/// Keep `held` for [`crate::triggers::ABANDONED_COMMIT_SETTLE`]: the hold of a commit whose
+	/// outcome is unknown, taken before the commit stops being counted as under way.
+	///
+	/// The store may land such a commit after it returned, so no transaction names a catalog or
+	/// build epoch until the store has landed it or never will; the epoch named after that is
+	/// past every epoch named before it, and its reads see the catalog as the commit left it.
+	fn hold_epochs_unsettled(&self, held: Option<EpochHold>) {
+		if let Some(held) = held {
+			common::rt::spawn_detached(async move {
+				sleep(crate::triggers::ABANDONED_COMMIT_SETTLE).await;
+				drop(held);
+			});
+		}
 	}
 
 	/// Keep this write transaction's commit, abandoned before its outcome was known, counted as
@@ -8086,9 +8163,11 @@ impl Transaction {
 			return self.commit_store().await;
 		}
 		let bound = self.tr.write_commit_bound();
+		let held = self.hold_epochs();
 		match common::time::timeout(bound, self.commit_store()).await {
 			Ok(committed) => committed,
 			Err(_) => {
+				self.hold_epochs_unsettled(held);
 				self.hold_abandoned_commit(crate::triggers::ABANDONED_COMMIT_SETTLE);
 				self.end_live_write();
 				Err(KvsError::CommitOutcomeUnknown(format!(
@@ -13384,6 +13463,11 @@ impl NodeProvider for Transaction {
 					None => {
 						let range = NodePrefix {}.range()?;
 						let val = self.tr.getr(range.into_key_range(), None).await?;
+						self.metrics.record_scan(
+							val.values.len() as u64,
+							val.key_bytes,
+							val.value_bytes,
+						);
 						let val =
 							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 						let entry = cache::tx::Entry::Nds(Arc::clone(&val));
@@ -13504,6 +13588,7 @@ impl NamespaceProvider for Transaction {
 				}
 				let range = NamespacePrefix {}.range()?;
 				let val = self.tr.getr(range.into_key_range(), version).await?;
+				self.metrics.record_scan(val.values.len() as u64, val.key_bytes, val.value_bytes);
 				let val = util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 				if version.is_none() {
 					let entry = cache::tx::Entry::Nss(Arc::clone(&val));
@@ -13627,6 +13712,7 @@ impl DatabaseProvider for Transaction {
 				}
 				.range()?;
 				let val = self.tr.getr(range.into_key_range(), version).await?;
+				self.metrics.record_scan(val.values.len() as u64, val.key_bytes, val.value_bytes);
 				let val = util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 				if version.is_none() {
 					let entry = cache::tx::Entry::Dbs(Arc::clone(&val));
@@ -13840,6 +13926,7 @@ impl DatabaseProvider for Transaction {
 				}
 				.range()?;
 				let val = self.tr.getr(range.into_key_range(), version).await?;
+				self.metrics.record_scan(val.values.len() as u64, val.key_bytes, val.value_bytes);
 				let val = util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 				if version.is_none() {
 					let entry = cache::tx::Entry::Azs(Arc::clone(&val));
@@ -13873,6 +13960,7 @@ impl DatabaseProvider for Transaction {
 				}
 				.range()?;
 				let val = self.tr.getr(range.into_key_range(), version).await?;
+				self.metrics.record_scan(val.values.len() as u64, val.key_bytes, val.value_bytes);
 				let val = util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 				if version.is_none() {
 					let entry = cache::tx::Entry::Sqs(Arc::clone(&val));
@@ -13906,6 +13994,7 @@ impl DatabaseProvider for Transaction {
 				}
 				.range()?;
 				let val = self.tr.getr(range.into_key_range(), version).await?;
+				self.metrics.record_scan(val.values.len() as u64, val.key_bytes, val.value_bytes);
 				let stored: Arc<[catalog::StoredFunctionDefinition]> =
 					util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 				let val = catalog::from_stored_all(&stored)?;
@@ -13941,6 +14030,7 @@ impl DatabaseProvider for Transaction {
 				}
 				.range()?;
 				let val = self.tr.getr(range.into_key_range(), version).await?;
+				self.metrics.record_scan(val.values.len() as u64, val.key_bytes, val.value_bytes);
 				let stored: Arc<[catalog::StoredModuleDefinition]> =
 					util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 				let val = catalog::from_stored_all(&stored)?;
@@ -13976,6 +14066,7 @@ impl DatabaseProvider for Transaction {
 				}
 				.range()?;
 				let val = self.tr.getr(range.into_key_range(), version).await?;
+				self.metrics.record_scan(val.values.len() as u64, val.key_bytes, val.value_bytes);
 				let stored: Arc<[catalog::StoredParamDefinition]> =
 					util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 				let val = catalog::from_stored_all(&stored)?;
@@ -14011,6 +14102,7 @@ impl DatabaseProvider for Transaction {
 				}
 				.range()?;
 				let val = self.tr.getr(range.into_key_range(), version).await?;
+				self.metrics.record_scan(val.values.len() as u64, val.key_bytes, val.value_bytes);
 				let stored: Arc<[catalog::StoredMlModelDefinition]> =
 					util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 				let val = catalog::from_stored_all(&stored)?;
@@ -14046,6 +14138,7 @@ impl DatabaseProvider for Transaction {
 				}
 				.range()?;
 				let val = self.tr.getr(range.into_key_range(), version).await?;
+				self.metrics.record_scan(val.values.len() as u64, val.key_bytes, val.value_bytes);
 				let stored: Arc<[StoredConfigDefinition]> =
 					util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 				let val = catalog::from_stored_all(&stored)?;
@@ -14556,6 +14649,7 @@ impl TableProvider for Transaction {
 				}
 				.range()?;
 				let val = self.tr.getr(range.into_key_range(), version).await?;
+				self.metrics.record_scan(val.values.len() as u64, val.key_bytes, val.value_bytes);
 				let stored: Arc<[StoredTableDefinition]> =
 					util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 				let registered: Arc<[TableDefinition]> = catalog::from_stored_all(&stored)?;
@@ -14822,6 +14916,7 @@ impl TableProvider for Transaction {
 				}
 				.range()?;
 				let val = self.tr.getr(range.into_key_range(), version).await?;
+				self.metrics.record_scan(val.values.len() as u64, val.key_bytes, val.value_bytes);
 				let stored: Arc<[catalog::StoredEventDefinition]> =
 					util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 				let val = catalog::from_stored_all(&stored)?;
@@ -14858,6 +14953,11 @@ impl TableProvider for Transaction {
 					}
 					.range()?;
 					let val = self.tr.getr(range.into_key_range(), version).await?;
+					self.metrics.record_scan(
+						val.values.len() as u64,
+						val.key_bytes,
+						val.value_bytes,
+					);
 					let stored: Arc<[catalog::StoredFieldDefinition]> =
 						util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 					return catalog::fields_from_stored(&stored);
@@ -14897,6 +14997,7 @@ impl TableProvider for Transaction {
 				}
 				.range()?;
 				let val = self.tr.getr(range.into_key_range(), version).await?;
+				self.metrics.record_scan(val.values.len() as u64, val.key_bytes, val.value_bytes);
 				let stored: Arc<[catalog::StoredIndexDefinition]> =
 					util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 				let val = catalog::from_stored_all(&stored)?;
@@ -14934,6 +15035,7 @@ impl TableProvider for Transaction {
 				}
 				.range()?;
 				let val = self.tr.getr(range.into_key_range(), version).await?;
+				self.metrics.record_scan(val.values.len() as u64, val.key_bytes, val.value_bytes);
 				let stored: Arc<[catalog::StoredSubscriptionDefinition]> =
 					util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 				let val = compile_subscriptions(tb, &stored);
@@ -15540,6 +15642,7 @@ impl UserProvider for Transaction {
 				}
 				let range = RootUserPrefix {}.range()?;
 				let val = self.tr.getr(range.into_key_range(), version).await?;
+				self.metrics.record_scan(val.values.len() as u64, val.key_bytes, val.value_bytes);
 				let val = util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 				if version.is_none() {
 					let entry = cache::tx::Entry::Rus(Arc::clone(&val));
@@ -15571,6 +15674,7 @@ impl UserProvider for Transaction {
 				}
 				.range()?;
 				let val = self.tr.getr(range.into_key_range(), version).await?;
+				self.metrics.record_scan(val.values.len() as u64, val.key_bytes, val.value_bytes);
 				let val = util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 				if version.is_none() {
 					let entry = cache::tx::Entry::Nus(Arc::clone(&val));
@@ -15604,6 +15708,7 @@ impl UserProvider for Transaction {
 				}
 				.range()?;
 				let val = self.tr.getr(range.into_key_range(), version).await?;
+				self.metrics.record_scan(val.values.len() as u64, val.key_bytes, val.value_bytes);
 				let val = util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 				if version.is_none() {
 					let entry = cache::tx::Entry::Dus(Arc::clone(&val));
@@ -15816,6 +15921,7 @@ impl AuthorisationProvider for Transaction {
 				}
 				let range = RootAccessMethodPrefix {}.range()?;
 				let val = self.tr.getr(range.into_key_range(), version).await?;
+				self.metrics.record_scan(val.values.len() as u64, val.key_bytes, val.value_bytes);
 				let stored: Arc<[catalog::StoredAccessDefinition]> =
 					util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 				let val = catalog::from_stored_all(&stored)?;
@@ -15848,6 +15954,7 @@ impl AuthorisationProvider for Transaction {
 				}
 				.range()?;
 				let val = self.tr.getr(range.into_key_range(), version).await?;
+				self.metrics.record_scan(val.values.len() as u64, val.key_bytes, val.value_bytes);
 				let val = util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 				if version.is_none() {
 					let entry = cache::tx::Entry::Rag(Arc::clone(&val));
@@ -15879,6 +15986,7 @@ impl AuthorisationProvider for Transaction {
 				}
 				.range()?;
 				let val = self.tr.getr(range.into_key_range(), version).await?;
+				self.metrics.record_scan(val.values.len() as u64, val.key_bytes, val.value_bytes);
 				let stored: Arc<[catalog::StoredAccessDefinition]> =
 					util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 				let val = catalog::from_stored_all(&stored)?;
@@ -15913,6 +16021,7 @@ impl AuthorisationProvider for Transaction {
 				}
 				.range()?;
 				let val = self.tr.getr(range.into_key_range(), version).await?;
+				self.metrics.record_scan(val.values.len() as u64, val.key_bytes, val.value_bytes);
 				let val = util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 				if version.is_none() {
 					let entry = cache::tx::Entry::Nag(Arc::clone(&val));
@@ -15946,6 +16055,7 @@ impl AuthorisationProvider for Transaction {
 				}
 				.range()?;
 				let val = self.tr.getr(range.into_key_range(), version).await?;
+				self.metrics.record_scan(val.values.len() as u64, val.key_bytes, val.value_bytes);
 				let stored: Arc<[catalog::StoredAccessDefinition]> =
 					util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 				let val = catalog::from_stored_all(&stored)?;
@@ -15982,6 +16092,7 @@ impl AuthorisationProvider for Transaction {
 				}
 				.range()?;
 				let val = self.tr.getr(range.into_key_range(), version).await?;
+				self.metrics.record_scan(val.values.len() as u64, val.key_bytes, val.value_bytes);
 				let val = util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 				if version.is_none() {
 					let entry = cache::tx::Entry::Dag(Arc::clone(&val));
@@ -16315,6 +16426,11 @@ impl ApiProvider for Transaction {
 					}
 					.range()?;
 					let val = self.tr.getr(range.into_key_range(), version).await?;
+					self.metrics.record_scan(
+						val.values.len() as u64,
+						val.key_bytes,
+						val.value_bytes,
+					);
 					let stored: Arc<[catalog::StoredApiDefinition]> =
 						util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 					return catalog::from_stored_all(&stored);
@@ -16329,6 +16445,11 @@ impl ApiProvider for Transaction {
 						}
 						.range()?;
 						let val = self.tr.getr(range.into_key_range(), None).await?;
+						self.metrics.record_scan(
+							val.values.len() as u64,
+							val.key_bytes,
+							val.value_bytes,
+						);
 						let stored: Arc<[catalog::StoredApiDefinition]> =
 							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 						let val = cache::tx::Entry::Aps(catalog::from_stored_all(&stored)?);
@@ -16445,6 +16566,7 @@ impl BucketProvider for Transaction {
 					.range()?,
 				};
 				let val = self.tr.getr(range.into_key_range(), version).await?;
+				self.metrics.record_scan(val.values.len() as u64, val.key_bytes, val.value_bytes);
 				let stored: Arc<[catalog::StoredBucketDefinition]> =
 					util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 				// Listed as stored: an export renders a database bucket stored with no
@@ -16547,6 +16669,7 @@ impl TypeProvider for Transaction {
 				}
 				.range()?;
 				let val = self.tr.getr(range.into_key_range(), version).await?;
+				self.metrics.record_scan(val.values.len() as u64, val.key_bytes, val.value_bytes);
 				let stored: Arc<[catalog::StoredTypeDefinition]> =
 					util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 				let val = catalog::from_stored_all(&stored)?;
